@@ -42,31 +42,27 @@ function AuthWrapper() {
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
 
-  // 💡 BULLETPROOF LISTENER: Manually parse tokens from the deep link
+  // 💡 LISTENER: Catches 'listner://callback#...'
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Capacitor?.isNative) {
       const handleOpenUrl = async ({ url }: { url: string }) => {
         console.log("App opened via URL:", url);
 
-        // Check if the URL contains the hash with tokens
+        // If url contains tokens, manually set the session
         if (url.includes('access_token') && url.includes('refresh_token')) {
           try {
-            // Extract hash part (e.g., #access_token=...&refresh_token=...)
             const hashIndex = url.indexOf('#');
             const hash = url.substring(hashIndex + 1);
-
-            // Parse parameters
             const params = new URLSearchParams(hash);
             const access_token = params.get('access_token');
             const refresh_token = params.get('refresh_token');
 
             if (access_token && refresh_token) {
-              console.log("Manual Token Exchange Success");
+              console.log("Deep link tokens found. Setting session.");
               await supabase.auth.setSession({
                 access_token,
                 refresh_token,
               });
-              // The auth state change listener below will pick this up automatically
             }
           } catch (e) {
             console.error("Error parsing deep link:", e);
@@ -214,11 +210,11 @@ function AuthPage() {
     return () => clearInterval(timer);
   }, []);
 
-  // 💡 UPDATED REDIRECT STRATEGY
+  // 💡 REDIRECT STRATEGY: Point to Bounce Page
   const getRedirectUrl = () => {
     const isNative = typeof window !== 'undefined' && window.Capacitor?.isNative;
     if (isNative) {
-      // 💡 ROUTE TO THE BOUNCE PAGE ON THE WEB
+      // Must match your Vercel URL + the bounce path
       return 'https://listner.vercel.app/auth/redirect';
     }
     return typeof window !== 'undefined' ? window.location.origin : '';
@@ -266,7 +262,6 @@ function AuthPage() {
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
   }
 
-  // ... (Rest of Render Code for AuthPage matches your original, keep styles and JSX same) ...
   return (
     <div className="relative min-h-screen w-full flex overflow-hidden bg-slate-50">
       <style jsx global>{`
@@ -307,6 +302,7 @@ function AuthPage() {
       </div>
 
       <div className="relative z-10 w-full flex flex-col lg:flex-row">
+        {/* Left Side */}
         <div className="hidden lg:flex w-1/2 h-screen flex-col justify-between p-16 text-slate-800 bg-slate-100/50">
           <div className="flex items-center gap-4">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-32 h-32 object-contain" />
@@ -327,6 +323,7 @@ function AuthPage() {
           <div className="text-xs text-slate-400">© 2025 ListNer Inc.</div>
         </div>
 
+        {/* Right Side */}
         <div className="w-full lg:w-1/2 h-screen flex flex-col items-center justify-center p-6">
           <div className="lg:hidden mb-8 flex flex-col items-center">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-16 h-16 mb-4 object-contain" />
