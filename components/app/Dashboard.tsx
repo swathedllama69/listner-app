@@ -4,7 +4,6 @@ import { useState, useEffect, FormEvent } from "react"
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
-// FIXED: Added Card imports here
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -108,7 +107,7 @@ function ContextualCreateDialog({ isOpen, onOpenChange, context, user, household
 }
 
 // --- LIST MANAGER ---
-function ListManager({ user, household, listType, onListSelected, currencySymbol }: { user: User, household: Household, listType: 'wishlist' | 'shopping', onListSelected: (isSelected: boolean) => void, currencySymbol: string }) {
+function ListManager({ user, household, listType, onListSelected, currencySymbol, refreshTrigger }: { user: User, household: Household, listType: 'wishlist' | 'shopping', onListSelected: (isSelected: boolean) => void, currencySymbol: string, refreshTrigger: number }) {
     const [lists, setLists] = useState<ListWithSummary[]>([])
     const [selectedList, setSelectedList] = useState<List | null>(null)
     const [isLoading, setIsLoading] = useState(true)
@@ -135,7 +134,9 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
         setLists(finalLists);
         setIsLoading(false);
     };
-    useEffect(() => { fetchLists() }, [household.id, listType]);
+
+    // Re-fetch when refreshTrigger changes
+    useEffect(() => { fetchLists() }, [household.id, listType, refreshTrigger]);
 
     const handleUpdateList = (updated: List) => setLists(lists.map(l => l.id === updated.id ? { ...l, ...updated } : l));
     const handleDeleteList = async () => {
@@ -241,13 +242,14 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const [showTutorial, setShowTutorial] = useState(false);
     const [isSyncOpen, setIsSyncOpen] = useState(false);
 
-    // --- NEW STATE FOR PRIVACY ---
+    // --- NEW STATE FOR REFRESHING ---
+    const [refreshKey, setRefreshKey] = useState(0);
+
     const [hideBalances, setHideBalances] = useState(false);
 
     const currencySymbol = getCurrencySymbol(household.currency || 'NGN');
 
     useEffect(() => {
-        // Check Local Storage for privacy preference
         const savedPrivacy = localStorage.getItem("listner_privacy_mode");
         if (savedPrivacy === "true") setHideBalances(true);
 
@@ -265,7 +267,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         }
     }, [household.id, user]);
 
-    // --- TOGGLE PRIVACY ---
     const togglePrivacy = () => {
         const newVal = !hideBalances;
         setHideBalances(newVal);
@@ -279,12 +280,23 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const formattedName = userName.charAt(0).toUpperCase() + userName.slice(1);
     const greeting = `${getGreeting()}, ${formattedName}`;
 
+    // Trigger a refresh
+    const handleGlobalRefresh = () => {
+        setRefreshKey(prev => prev + 1);
+    }
+
+    const handleOnboardingComplete = () => {
+        // Fix: Mark tutorial as seen so it doesn't pop up right after onboarding
+        localStorage.setItem(`tutorial_seen_${user.id}`, "true");
+        setShowOnboarding(false);
+        window.location.reload();
+    }
+
     return (
         <SidebarLayout user={user} household={household} memberCount={memberCount} activeTab={activeTab} setActiveTab={setActiveTab}>
             <div className="w-full pb-24 relative">
 
                 {/* --- UPDATED HEADER LAYOUT --- */}
-                {/* DESKTOP: Row Layout */}
                 <div className="hidden md:flex flex-row items-center justify-between gap-4 mb-6">
                     <div>
                         <h1 className="text-lg font-semibold text-slate-500 tracking-tight">{getPageTitle(activeTab)}</h1>
@@ -303,9 +315,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     </div>
                 </div>
 
-                {/* MOBILE: Custom Layout per user request */}
                 <div className="md:hidden mb-6 space-y-3">
-                    {/* ROW 1: Title + Invite */}
                     <div className="flex justify-between items-center">
                         <h1 className="text-xl font-bold text-slate-800 tracking-tight">{getPageTitle(activeTab)}</h1>
                         {memberCount < 2 && (
@@ -315,7 +325,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                         )}
                     </div>
 
-                    {/* ROW 2: Greeting + Bell + Eye */}
                     <div className="flex justify-between items-end">
                         <p className="text-sm text-slate-500 font-medium pb-1">{greeting}</p>
                         <div className="flex items-center gap-1">
@@ -337,11 +346,11 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     </TabsContent>
 
                     <TabsContent value="wishlist" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
-                        <ListManager user={user} household={household} listType="wishlist" onListSelected={setIsListDetailActive} currencySymbol={currencySymbol} />
+                        <ListManager user={user} household={household} listType="wishlist" onListSelected={setIsListDetailActive} currencySymbol={currencySymbol} refreshTrigger={refreshKey} />
                     </TabsContent>
 
                     <TabsContent value="shopping" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
-                        <ListManager user={user} household={household} listType="shopping" onListSelected={setIsListDetailActive} currencySymbol={currencySymbol} />
+                        <ListManager user={user} household={household} listType="shopping" onListSelected={setIsListDetailActive} currencySymbol={currencySymbol} refreshTrigger={refreshKey} />
                     </TabsContent>
 
                     <TabsContent value="finance" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
@@ -357,9 +366,9 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     <PortalFAB onClick={() => setIsFabOpen(true)} className={`h-16 w-16 rounded-full shadow-2xl bg-lime-400 hover:bg-lime-500 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95 hover:rotate-90 duration-300`} icon={Plus} />
                 )}
 
-                {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={() => { setShowOnboarding(false); localStorage.getItem(`tutorial_seen_${user.id}`) || setShowTutorial(true); window.location.reload(); }} />}
+                {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={handleOnboardingComplete} />}
                 {showTutorial && !showOnboarding && <Tutorial onComplete={() => setShowTutorial(false)} />}
-                <ContextualCreateDialog isOpen={isFabOpen} onOpenChange={setIsFabOpen} context={activeTab} user={user} household={household} onSuccess={() => window.location.reload()} currencySymbol={currencySymbol} />
+                <ContextualCreateDialog isOpen={isFabOpen} onOpenChange={setIsFabOpen} context={activeTab} user={user} household={household} onSuccess={handleGlobalRefresh} currencySymbol={currencySymbol} />
 
                 <HouseholdSyncDialog
                     isOpen={isSyncOpen}

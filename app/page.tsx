@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Session, User } from '@supabase/supabase-js';
 import { Dashboard } from '@/components/app/Dashboard';
@@ -41,38 +41,41 @@ function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
+  const [isProcessingUrl, setIsProcessingUrl] = useState(false);
+
+  // Track if we have initialized listeners to prevent duplicates
+  const listenersInitialized = useRef(false);
 
   // 💡 1. RESCUE LOGIC (Web Fallback)
-  // If user gets stuck on Web Home with a token, throw them to App
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash;
       const search = window.location.search;
 
-      // If we have login tokens BUT we are in a mobile browser (not the app)
       const hasTokens = hash.includes('access_token') || search.includes('code');
       const isNative = window.Capacitor?.isNative;
       const isMobileWidth = window.innerWidth < 768;
 
       if (hasTokens && !isNative && isMobileWidth) {
         console.log("⚠️ Stuck on Web with tokens! Rescuing to App...");
-        // Force the deep link to open the app
         window.location.href = `listner://callback${search}${hash}`;
       }
     }
   }, []);
 
-  // 💡 2. NATIVE LISTENER (The Fix)
+  // 💡 2. NATIVE LISTENER (Cold & Warm Start Fixes)
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.Capacitor?.isNative) {
+    if (typeof window !== 'undefined' && window.Capacitor?.isNative && !listenersInitialized.current) {
+      listenersInitialized.current = true;
 
       const handleUrl = async (url: string) => {
         console.log("📲 Deep Link Detected:", url);
+        if (isProcessingUrl) return;
+        setIsProcessingUrl(true);
 
         try {
-          // PKCE Flow (The modern default)
+          // PKCE Flow
           if (url.includes('code=')) {
-            console.log("PKCE Code detected. Exchanging...");
             const params = new URLSearchParams(url.split('?')[1]);
             const code = params.get('code');
             if (code) {
@@ -81,9 +84,8 @@ function AuthWrapper() {
               console.log("✅ Session exchanged!");
             }
           }
-          // Implicit Flow (Backup)
+          // Implicit Flow
           else if (url.includes('access_token')) {
-            console.log("Hash tokens detected.");
             const hashIndex = url.indexOf('#');
             const hash = url.substring(hashIndex + 1);
             const params = new URLSearchParams(hash);
@@ -96,26 +98,27 @@ function AuthWrapper() {
           }
         } catch (e) {
           console.error("Deep link error:", e);
+        } finally {
+          setIsProcessingUrl(false);
         }
       };
 
       // A. Listen for new URLs (Warm Start)
       App.addListener('appUrlOpen', (data) => handleUrl(data.url));
 
-      // B. Check for "Missed" URLs (Cold Start / Restart)
-      // 💡 We add a slight delay (200ms) to let the native bridge settle before checking
+      // B. Check for "Missed" URLs (Cold Start)
+      // We wait 500ms to ensure the native bridge is fully ready
       setTimeout(async () => {
         const launchData = await App.getLaunchUrl();
         if (launchData && launchData.url) {
           console.log("🚀 Recovered Cold Start URL:", launchData.url);
           handleUrl(launchData.url);
         }
-      }, 200);
-
-      return () => { App.removeAllListeners(); };
+      }, 500);
     }
   }, []);
 
+  // 💡 3. DATA SYNC & STAGE MANAGEMENT
   useEffect(() => {
     const fetchSession = async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -127,9 +130,12 @@ function AuthWrapper() {
     };
     fetchSession();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        fetchProfileAndHousehold(session.user);
+        // Only fetch if we don't have the user or it's a distinct login event
+        if (!user || event === 'SIGNED_IN') {
+          await fetchProfileAndHousehold(session.user);
+        }
       } else {
         setUser(null);
         setHousehold(null);
@@ -140,22 +146,14 @@ function AuthWrapper() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Sync state between user/profile and stage
-  useEffect(() => {
-    if (user && user.has_seen_tutorial && household) {
-      setStage('APP');
-    } else if (user && !user.has_seen_tutorial) {
-      setStage('TUTORIAL');
-    } else if (user && !household && user.has_seen_tutorial) {
-      setStage('SETUP_HOUSEHOLD');
-    } else if (!user && stage !== 'LOADING') {
-      setStage('AUTH');
-    }
-  }, [user, household, stage]);
-
   const fetchProfileAndHousehold = async (u: User) => {
+    // 1. Get Profile
     let profileData: { has_seen_tutorial: boolean, username?: string } | null = null;
-    let { data: profileRow, error: profileError } = await supabase.from('profiles').select('has_seen_tutorial, username').eq('id', u.id).single();
+    let { data: profileRow, error: profileError } = await supabase
+      .from('profiles')
+      .select('has_seen_tutorial, username')
+      .eq('id', u.id)
+      .single();
 
     if (profileRow) {
       profileData = profileRow;
@@ -168,6 +166,7 @@ function AuthWrapper() {
       profileData = newProfileData;
     }
 
+    // 2. Get Household
     let currentHousehold: Household | null = null;
     const { data: householdData } = await supabase
       .from("household_members")
@@ -182,29 +181,46 @@ function AuthWrapper() {
     const mergedUser: UserProfile = { ...u, ...profileData! };
     setUser(mergedUser);
     setHousehold(currentHousehold);
-
-    if (currentHousehold) {
-      setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
-    } else {
-      setStage('SETUP_HOUSEHOLD');
-    }
+    determineStage(mergedUser, currentHousehold);
   }
 
-  const handleTutorialComplete = async () => {
-    const { data: updatedProfile, error } = await supabase
-      .from('profiles')
-      .update({ has_seen_tutorial: true })
-      .eq('id', user!.id)
-      .select('has_seen_tutorial, username')
-      .single();
-
-    if (!error && updatedProfile) {
-      const mergedUser: UserProfile = { ...user!, ...updatedProfile };
-      setUser(mergedUser);
+  // 💡 4. STRICT STAGE LOGIC (Prevents Loops)
+  const determineStage = (u: UserProfile, h: Household | null) => {
+    if (!u) {
+      setStage('AUTH');
+      return;
+    }
+    // If they haven't seen tutorial, show it (High Priority)
+    if (!u.has_seen_tutorial) {
+      setStage('TUTORIAL');
+      return;
+    }
+    // If they have seen tutorial but no household, go to setup
+    if (!h) {
       setStage('SETUP_HOUSEHOLD');
+      return;
+    }
+    // Otherwise, enter app
+    setStage('APP');
+  }
+
+  // 💡 5. STICKY TUTORIAL UPDATE
+  const handleTutorialComplete = async () => {
+    if (!user) return;
+
+    // 1. Optimistic Update: Update local state immediately so UI moves forward
+    const updatedUser = { ...user, has_seen_tutorial: true };
+    setUser(updatedUser);
+
+    // 2. Move stage immediately based on household status
+    if (household) {
+      setStage('APP');
     } else {
       setStage('SETUP_HOUSEHOLD');
     }
+
+    // 3. Background DB Update
+    await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   }
 
   const handleHouseholdCreated = (u: User) => {
@@ -283,7 +299,6 @@ function AuthPage() {
           const { error } = await supabase.auth.signInWithPassword({ email, password });
           if (error) throw error;
         } else {
-          // Standard Web Redirect for magic link (will use custom deep link if native)
           const redirectTo = getRedirectUrl();
           const { error } = await supabase.auth.signInWithOtp({
             email,

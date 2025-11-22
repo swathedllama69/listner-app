@@ -123,7 +123,11 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     // --- ACTIONS ---
     const handleRenameList = async () => {
         const { error } = await supabase.from('lists').update({ name: listNameForm }).eq('id', list.id);
-        if (!error) { setIsRenameOpen(false); window.location.reload(); }
+        if (!error) {
+            setListSettings(prev => ({ ...prev, name: listNameForm }));
+            setIsRenameOpen(false);
+            // No reload here to prevent app refresh
+        }
     }
 
     const handleAddItem = async (e: FormEvent) => {
@@ -177,7 +181,8 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             await supabase.from("wishlist_items").delete().eq("id", deleteConfirm.id);
             setItems(items.filter(item => item.id !== deleteConfirm.id));
         } else if (deleteConfirm.type === 'list') {
-            await supabase.from('lists').delete().eq('id', list.id); window.location.reload();
+            await supabase.from('lists').delete().eq('id', list.id);
+            window.location.reload(); // Reloading on list delete is acceptable as we need to go back
         }
         setDeleteConfirm(null);
     }
@@ -191,7 +196,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         <div className="space-y-6 pb-24">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-2xl font-bold text-slate-800">{list.name}</h2>
+                    <h2 className="text-2xl font-bold text-slate-800">{listSettings.name}</h2>
                     <div className="flex gap-2 mt-1">{listSettings.isPrivate ? <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100"><Lock className="w-3 h-3" /> Private</span> : <span className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100"><Globe className="w-3 h-3" /> Shared</span>}</div>
                 </div>
                 <DropdownMenu>
