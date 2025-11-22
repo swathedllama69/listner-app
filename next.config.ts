@@ -1,32 +1,25 @@
 import type { NextConfig } from "next";
 
 // Check if we are intentionally building for the mobile app
-// You can set this env var in your build script: "cross-env CAPACITOR=true next build"
-// Or just default to true if this repo is primarily for the mobile app.
-const isCapacitor = process.env.CAPACITOR === 'true' || true; // 💡 Defaulting to true for safety in your current context
+const isCapacitor = process.env.CAPACITOR === 'true' || true; // Default to true to be safe for now
 
 const nextConfig: NextConfig = {
-  // 1. CRITICAL: Generate static HTML/CSS/JS for Capacitor
+  // 1. CRITICAL: Generate static HTML for Capacitor
   output: isCapacitor ? 'export' : undefined,
 
-  // 2. CRITICAL: Disable server-side image optimization
+  // 2. CRITICAL: Disable server-side image optimization for mobile
   images: {
-    unoptimized: true,
+    unoptimized: isCapacitor,
     remotePatterns: [
       {
         protocol: 'https',
         hostname: '**.supabase.co',
       },
-      // Add other domains if you load user avatars from Google/Facebook
-      {
-        protocol: 'https',
-        hostname: '*.googleusercontent.com',
-      },
     ],
   },
 
-  // 3. OPTIONAL: Fix CSP issues if deployed to Vercel
-  // This allows 'eval' which some libraries might need, preventing the white screen of death.
+  // 3. CRITICAL: Fix the "Eval" Crash
+  // This tells the browser/webview: "It is okay to use libraries that use eval()"
   async headers() {
     return [
       {

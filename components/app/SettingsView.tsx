@@ -12,8 +12,7 @@ import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-// FIXED: Added 'Users' to the import list
-import { Camera, LogOut, Settings as SettingsIcon, Loader2, UserMinus, Shield, AlertTriangle, Home, User as UserIcon, Smartphone, Bell, Moon, Lock, Mail, Key, HelpCircle, Users } from "lucide-react"
+import { Camera, LogOut, Loader2, UserMinus, Shield, AlertTriangle, Home, User as UserIcon, Smartphone, Bell, Moon, Lock, Mail, Key, HelpCircle, Users } from "lucide-react"
 import { COUNTRIES, CURRENCIES } from "@/lib/constants"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 
@@ -90,9 +89,13 @@ export function SettingsView({ user, household }: { user: User, household: House
             const path = `${user.id}/avatar-${Date.now()}.jpg`;
             await supabase.storage.from('images').upload(path, compressed);
             const { data } = supabase.storage.from('images').getPublicUrl(path);
+
+            // Update Auth User
             await supabase.auth.updateUser({ data: { avatar_url: data.publicUrl } });
+
+            // Update Local State (No Reload Needed)
             setAvatarUrl(data.publicUrl);
-            window.location.reload();
+            alert("Profile photo updated!");
         } catch (err: any) { alert(err.message); } finally { setUploading(false); }
     };
 
@@ -105,9 +108,13 @@ export function SettingsView({ user, household }: { user: User, household: House
             const path = `household-${household.id}/icon-${Date.now()}.jpg`;
             await supabase.storage.from('images').upload(path, compressed);
             const { data } = supabase.storage.from('images').getPublicUrl(path);
+
+            // Update Database
             await supabase.from('households').update({ avatar_url: data.publicUrl }).eq('id', household.id);
+
+            // Update Local State (No Reload Needed)
             setHhForm(prev => ({ ...prev, avatar_url: data.publicUrl }));
-            window.location.reload();
+            alert("Household icon updated!");
         } catch (err: any) { alert(err.message); } finally { setUploading(false); }
     };
 
@@ -115,7 +122,8 @@ export function SettingsView({ user, household }: { user: User, household: House
         setLoading(true);
         const { error } = await supabase.auth.updateUser({ data: { full_name: name } });
         setLoading(false);
-        if (error) alert(error.message); else { alert("Profile updated."); window.location.reload(); }
+        if (error) alert(error.message);
+        else alert("Profile name updated.");
     }
 
     const handleSaveHousehold = async () => {
@@ -123,7 +131,8 @@ export function SettingsView({ user, household }: { user: User, household: House
         setLoading(true);
         const { error } = await supabase.from('households').update({ name: hhForm.name, country: hhForm.country, currency: hhForm.currency }).eq('id', household.id);
         setLoading(false);
-        if (error) alert(error.message); else { alert("Household updated."); window.location.reload(); }
+        if (error) alert(error.message);
+        else alert("Household details updated.");
     }
 
     const triggerVerification = (type: 'leave' | 'delete') => {
