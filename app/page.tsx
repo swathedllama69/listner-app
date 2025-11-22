@@ -44,6 +44,8 @@ function AuthWrapper() {
   const [debugMsg, setDebugMsg] = useState("");
 
   const listenersInitialized = useRef(false);
+  // 💡 FIX: Track processed URLs to prevent "Code already used" errors during retries
+  const processedUrls = useRef<Set<string>>(new Set());
 
   // 💡 1. RESCUE LOGIC (Web Fallback)
   useEffect(() => {
@@ -67,6 +69,13 @@ function AuthWrapper() {
       listenersInitialized.current = true;
 
       const handleUrl = async (url: string) => {
+        // 💡 FIX: Prevent double-processing the same URL (Cold Start Bug)
+        if (processedUrls.current.has(url)) {
+          console.log("🚫 URL already processed, skipping:", url);
+          return;
+        }
+        processedUrls.current.add(url);
+
         console.log("📲 Deep Link Detected:", url);
         setDebugMsg("Processing login...");
 
@@ -93,7 +102,10 @@ function AuthWrapper() {
           }
         } catch (e: any) {
           console.error("Deep link error:", e);
-          alert(`Login Error: ${e.message}`);
+          // Only alert if it's NOT a "code already used" error, which might happen innocently
+          if (!e.message?.includes('flow state')) {
+            alert(`Login Error: ${e.message}`);
+          }
           setStage('AUTH');
         }
       };
@@ -308,7 +320,12 @@ function AuthPage() {
       await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectTo
+          redirectTo: redirectTo,
+          // 💡 FIX: Ensure we request offline access for refresh tokens
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
         }
       });
     } catch (error) {
