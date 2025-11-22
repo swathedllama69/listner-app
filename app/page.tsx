@@ -2,19 +2,23 @@
 
 import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
-import { Session, User } from '@supabase/supabase-js';
+import { User } from '@supabase/supabase-js';
 import { Dashboard } from '@/components/app/Dashboard';
 import { OnboardingScreen } from '@/components/app/OnboardingScreen';
 import { Tutorial } from '@/components/app/Tutorial';
 import { CreateHouseholdForm } from '@/components/app/CreateHouseholdForm';
 import { Household } from '@/lib/types';
-import { Loader2, ShieldCheck, Users, Mail, Lock, Wand2, ArrowLeft, CheckCircle2, ArrowRight, ListChecks, ShoppingCart, Wallet } from "lucide-react";
+import {
+  Loader2, ShieldCheck, Users, Mail, Lock, Wand2, ArrowLeft,
+  CheckCircle2, ArrowRight, ListChecks, ShoppingCart, Wallet
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 
 /* eslint-disable @next/next/no-img-element */
 
@@ -41,22 +45,63 @@ function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
-  const [debugMsg, setDebugMsg] = useState("");
+  const [debugMsg, setDebugMsg] = useState("Initializing...");
 
   const listenersInitialized = useRef(false);
   // 💡 FIX: Track processed URLs to prevent "Code already used" errors during retries
   const processedUrls = useRef<Set<string>>(new Set());
 
+  // --- HELPER: PROCESS URL ---
+  const handleUrl = async (url: string) => {
+    // 💡 FIX: Prevent double-processing the same URL
+    if (processedUrls.current.has(url)) {
+      return;
+    }
+    processedUrls.current.add(url);
+
+    console.log("📲 Deep Link Detected:", url);
+    setDebugMsg("Processing login...");
+
+    try {
+      if (url.includes('code=')) {
+        const params = new URLSearchParams(url.split('?')[1]);
+        const code = params.get('code');
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+          setDebugMsg("Session exchanged!");
+        }
+      }
+      else if (url.includes('access_token')) {
+        const hashIndex = url.indexOf('#');
+        const hash = url.substring(hashIndex + 1);
+        const params = new URLSearchParams(hash);
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token');
+
+        if (access_token && refresh_token) {
+          await supabase.auth.setSession({ access_token, refresh_token });
+        }
+      }
+    } catch (e: any) {
+      console.error("Deep link error:", e);
+      // Only alert if it's NOT a "code already used" error
+      if (!e.message?.includes('flow state')) {
+        alert(`Login Error: ${e.message}`);
+      }
+      setStage('AUTH');
+    }
+  };
+
   // 💡 1. RESCUE LOGIC (Web Fallback)
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
       const hash = window.location.hash;
       const search = window.location.search;
       const hasTokens = hash.includes('access_token') || search.includes('code');
-      const isNative = window.Capacitor?.isNative;
       const isMobileWidth = window.innerWidth < 768;
 
-      if (hasTokens && !isNative && isMobileWidth) {
+      if (hasTokens && isMobileWidth) {
         console.log("⚠️ Stuck on Web with tokens! Rescuing to App...");
         window.location.href = `listner://callback${search}${hash}`;
       }
@@ -65,50 +110,8 @@ function AuthWrapper() {
 
   // 💡 2. NATIVE LISTENER (Aggressive Check)
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.Capacitor?.isNative && !listenersInitialized.current) {
+    if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
       listenersInitialized.current = true;
-
-      const handleUrl = async (url: string) => {
-        // 💡 FIX: Prevent double-processing the same URL (Cold Start Bug)
-        if (processedUrls.current.has(url)) {
-          console.log("🚫 URL already processed, skipping:", url);
-          return;
-        }
-        processedUrls.current.add(url);
-
-        console.log("📲 Deep Link Detected:", url);
-        setDebugMsg("Processing login...");
-
-        try {
-          if (url.includes('code=')) {
-            const params = new URLSearchParams(url.split('?')[1]);
-            const code = params.get('code');
-            if (code) {
-              const { error } = await supabase.auth.exchangeCodeForSession(code);
-              if (error) throw error;
-              setDebugMsg("Session exchanged!");
-            }
-          }
-          else if (url.includes('access_token')) {
-            const hashIndex = url.indexOf('#');
-            const hash = url.substring(hashIndex + 1);
-            const params = new URLSearchParams(hash);
-            const access_token = params.get('access_token');
-            const refresh_token = params.get('refresh_token');
-
-            if (access_token && refresh_token) {
-              await supabase.auth.setSession({ access_token, refresh_token });
-            }
-          }
-        } catch (e: any) {
-          console.error("Deep link error:", e);
-          // Only alert if it's NOT a "code already used" error, which might happen innocently
-          if (!e.message?.includes('flow state')) {
-            alert(`Login Error: ${e.message}`);
-          }
-          setStage('AUTH');
-        }
-      };
 
       // A. Listen for new URLs (Warm Start)
       App.addListener('appUrlOpen', (data) => handleUrl(data.url));
@@ -122,10 +125,13 @@ function AuthWrapper() {
         }
       };
 
-      // Check immediately, then at 500ms, then at 2000ms to catch it whenever the bridge is ready
+      // Aggressive polling to catch the URL during hydration
       checkLaunchUrl();
+      setTimeout(checkLaunchUrl, 200);
       setTimeout(checkLaunchUrl, 500);
+      setTimeout(checkLaunchUrl, 1000);
       setTimeout(checkLaunchUrl, 2000);
+      setTimeout(checkLaunchUrl, 3000);
     }
   }, []);
 
@@ -177,7 +183,6 @@ function AuthWrapper() {
     const mergedUser: UserProfile = { ...u, ...profileData! };
 
     // 💡 CRITICAL TUTORIAL FIX: Trust Local Storage over DB for the 'seen' flag
-    // This prevents the tutorial from showing again if the DB update is slow
     const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${u.id}`) : null;
     if (localSeen === 'true') {
       mergedUser.has_seen_tutorial = true;
@@ -200,18 +205,13 @@ function AuthWrapper() {
   const handleTutorialComplete = async () => {
     if (!user) return;
 
-    // 1. Optimistic Update (Immediate)
     const updatedUser = { ...user, has_seen_tutorial: true };
     setUser(updatedUser);
-
-    // 2. Save to Local Storage (Permanent local flag)
     localStorage.setItem(`tutorial_seen_${user.id}`, "true");
 
-    // 3. Move Stage Immediately
     if (household) setStage('APP');
     else setStage('SETUP_HOUSEHOLD');
 
-    // 4. Update DB in Background
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   }
 
@@ -321,7 +321,6 @@ function AuthPage() {
         provider: 'google',
         options: {
           redirectTo: redirectTo,
-          // 💡 FIX: Ensure we request offline access for refresh tokens
           queryParams: {
             access_type: 'offline',
             prompt: 'consent',
@@ -377,7 +376,6 @@ function AuthPage() {
         {/* Left Side */}
         <div className="hidden lg:flex w-1/2 h-screen flex-col justify-between p-16 text-slate-800 bg-slate-100/50">
           <div className="flex items-center gap-4">
-            {/* Logo Size increased to w-32 h-32 */}
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-32 h-32 object-contain" />
             <span className="text-4xl font-bold tracking-tight">ListNer.</span>
           </div>
