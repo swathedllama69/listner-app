@@ -4,4 +4,8 @@
     <string name="title_activity_main">ListNer</string>
     <string name="package_name">com.listner.app</string>
     <string name="custom_url_scheme">com.listner.app</string>
+    <string name="server_client_id">853973010898-b2unfthr8e36gj7gcifa5ah51084ce5j.apps.googleusercontent.com</string>
+
 </resources>
+
+
