@@ -36,13 +36,14 @@ export default function Home() {
   return <AuthWrapper />;
 }
 
-// --- AUTH WRAPPER (Handles WELCOME, AUTH, TUTORIAL Flow) ---
+// --- AUTH WRAPPER (Handles Logic) ---
 function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
 
-  // 💡 1. RESCUE LOGIC: If user gets stuck on Web Home with a token, throw them to App
+  // 💡 1. RESCUE LOGIC (Web Fallback)
+  // If user gets stuck on Web Home with a token, throw them to App
   useEffect(() => {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash;
@@ -61,7 +62,7 @@ function AuthWrapper() {
     }
   }, []);
 
-  // 💡 2. NATIVE LISTENER: Handles "Warm Start" (App already running) AND "Cold Start"
+  // 💡 2. NATIVE LISTENER (The Fix)
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Capacitor?.isNative) {
 
@@ -98,16 +99,18 @@ function AuthWrapper() {
         }
       };
 
-      // A. Listen for new URLs (while app is open)
+      // A. Listen for new URLs (Warm Start)
       App.addListener('appUrlOpen', (data) => handleUrl(data.url));
 
-      // B. Check if app was JUST opened via URL (Cold Start Check)
-      App.getLaunchUrl().then((launchData) => {
+      // B. Check for "Missed" URLs (Cold Start / Restart)
+      // 💡 We add a slight delay (200ms) to let the native bridge settle before checking
+      setTimeout(async () => {
+        const launchData = await App.getLaunchUrl();
         if (launchData && launchData.url) {
-          console.log("🚀 Cold Start via URL detected");
+          console.log("🚀 Recovered Cold Start URL:", launchData.url);
           handleUrl(launchData.url);
         }
-      });
+      }, 200);
 
       return () => { App.removeAllListeners(); };
     }
