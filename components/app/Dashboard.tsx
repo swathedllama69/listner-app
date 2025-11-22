@@ -128,7 +128,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
         if (summaries) {
             const summaryMap = new Map(summaries.map((s: ListSummary) => [s.list_id, s]));
             finalLists = data.map((list: List) => {
-                const s = summaryMap.get(list.id);
+                const s: any = summaryMap.get(list.id);
                 return { ...list, pending_items: s?.total_pending_items || 0, estimated_cost: s?.estimated_cost || 0, active_goals: s?.total_active_goals || 0, target_amount: s?.total_target_amount || 0, saved_amount: s?.total_saved_amount || 0 }
             });
         }
