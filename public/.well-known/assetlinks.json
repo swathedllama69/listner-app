@@ -1,0 +1,14 @@
+[
+    {
+        "relation": [
+            "delegate_permission/common.handle_all_urls"
+        ],
+        "target": {
+            "namespace": "android_app",
+            "package_name": "com.listner.app",
+            "sha256_cert_fingerprints": [
+                "A4:78:8E:C9:BC:8F:1E:89:31:CB:56:B9:86:65:F7:21:8C:D4:00:1C:7E:F0:08:02:75:6F:B0:DB:53:8B:E0:41"
+            ]
+        }
+    }
+]
