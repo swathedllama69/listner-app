@@ -358,8 +358,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                 )}
 
                 {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={() => { setShowOnboarding(false); localStorage.getItem(`tutorial_seen_${user.id}`) || setShowTutorial(true); window.location.reload(); }} />}
-                {showTutorial && !showOnboarding && <Tutorial userName={user.id} onComplete={() => setShowTutorial(false)} />}
-
+                {showTutorial && !showOnboarding && <Tutorial onComplete={() => setShowTutorial(false)} />}
                 <ContextualCreateDialog isOpen={isFabOpen} onOpenChange={setIsFabOpen} context={activeTab} user={user} household={household} onSuccess={() => window.location.reload()} currencySymbol={currencySymbol} />
 
                 <HouseholdSyncDialog

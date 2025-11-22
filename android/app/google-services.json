@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "303279693218",
+    "project_id": "listner-dc99b",
+    "storage_bucket": "listner-dc99b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:303279693218:android:634b3315a872632ea766fb",
+        "android_client_info": {
+          "package_name": "com.listner.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0g06yQ119kS4Ro2x2yzQuDEAeJsFfdMc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

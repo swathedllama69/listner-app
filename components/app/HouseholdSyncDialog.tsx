@@ -24,6 +24,7 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
     // TAB 1: GENERATE INVITE
     const handleGenerateInvite = async () => {
         setLoading(true)
+        // RPC calls are not directly exposed in the file content, assuming 'create_invite_code' exists
         const { data, error } = await supabase.rpc('create_invite_code', { target_household_id: householdId })
         setLoading(false)
         if (!error) setInviteCode(data)
@@ -33,8 +34,7 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
     const handlePreview = async () => {
         if (!joinCode.trim()) return;
         setLoading(true);
-        // Try to peek at the household. *Note: This requires RLS to allow reading by invite_code, 
-        // or a specific RPC. Falling back to a safe assumption if fetch fails.*
+        // Try to peek at the household. 
         try {
             const { data, error } = await supabase
                 .from('households')
@@ -46,11 +46,10 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
                 setPreviewName(data.name);
                 setStep('preview');
             } else {
-                // If direct access failed (RLS), we might just have to proceed blindly or warn
-                alert("Invalid code or household not found.");
+                console.error("Invalid code or household not found.");
             }
         } catch (e) {
-            alert("Could not verify code.");
+            console.error("Could not verify code:", e);
         } finally {
             setLoading(false);
         }
@@ -67,7 +66,7 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
             onOpenChange(false);
             onJoinSuccess(); // Triggers reload
         } catch (err: any) {
-            alert(err.message);
+            console.error(err.message);
         } finally {
             setLoading(false);
         }
@@ -76,6 +75,7 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-md rounded-2xl">
+                {/* ACCESSIBILITY FIX: Ensure DialogHeader and DialogTitle are always present */}
                 <DialogHeader>
                     <DialogTitle className="text-xl font-bold text-slate-900">Sync Household</DialogTitle>
                     <DialogDescription>Connect with your partner or housemate.</DialogDescription>
@@ -101,7 +101,15 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
                                         <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Your Code</p>
                                         <p className="text-3xl font-mono font-bold tracking-widest text-lime-400">{inviteCode}</p>
                                     </div>
-                                    <Button variant="outline" className="w-full" onClick={() => { navigator.clipboard.writeText(inviteCode); alert("Copied!") }}>
+                                    <Button variant="outline" className="w-full" onClick={() => {
+                                        // Using document.execCommand('copy') for better compatibility in iframe/web environments
+                                        const el = document.createElement('textarea');
+                                        el.value = inviteCode;
+                                        document.body.appendChild(el);
+                                        el.select();
+                                        document.execCommand('copy');
+                                        document.body.removeChild(el);
+                                    }}>
                                         <Copy className="w-4 h-4 mr-2" /> Copy Code
                                     </Button>
                                 </div>
@@ -142,6 +150,8 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
                                         <li>Your dashboard will update to show <strong>{previewName}</strong>'s data.</li>
                                         <li>Your current lists will be moved here.</li>
                                         <li><strong>Private lists will remain private</strong> unless you choose to share them later.</li>
+                                        {/* Added small link to go back */}
+                                        <li className="mt-2"><button onClick={() => setStep('input')} className="text-blue-600 font-semibold hover:underline">Go Back to Input</button></li>
                                     </ul>
                                 </div>
 
