@@ -36,14 +36,14 @@ export default function Home() {
   return <AuthWrapper />;
 }
 
-// --- AUTH WRAPPER (Handles Logic) ---
+// --- AUTH WRAPPER ---
 function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
-  const [isProcessingUrl, setIsProcessingUrl] = useState(false);
+  const [debugMsg, setDebugMsg] = useState("");
 
-  // Track if we have initialized listeners to prevent duplicates
+  // Prevent duplicate listeners in React Strict Mode
   const listenersInitialized = useRef(false);
 
   // 💡 1. RESCUE LOGIC (Web Fallback)
@@ -51,7 +51,6 @@ function AuthWrapper() {
     if (typeof window !== 'undefined') {
       const hash = window.location.hash;
       const search = window.location.search;
-
       const hasTokens = hash.includes('access_token') || search.includes('code');
       const isNative = window.Capacitor?.isNative;
       const isMobileWidth = window.innerWidth < 768;
@@ -63,15 +62,14 @@ function AuthWrapper() {
     }
   }, []);
 
-  // 💡 2. NATIVE LISTENER (Cold & Warm Start Fixes)
+  // 💡 2. NATIVE LISTENER (The Fix)
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Capacitor?.isNative && !listenersInitialized.current) {
       listenersInitialized.current = true;
 
       const handleUrl = async (url: string) => {
         console.log("📲 Deep Link Detected:", url);
-        if (isProcessingUrl) return;
-        setIsProcessingUrl(true);
+        setDebugMsg("Processing login...");
 
         try {
           // PKCE Flow
@@ -81,7 +79,7 @@ function AuthWrapper() {
             if (code) {
               const { error } = await supabase.auth.exchangeCodeForSession(code);
               if (error) throw error;
-              console.log("✅ Session exchanged!");
+              setDebugMsg("Session exchanged!");
             }
           }
           // Implicit Flow
@@ -96,10 +94,10 @@ function AuthWrapper() {
               await supabase.auth.setSession({ access_token, refresh_token });
             }
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error("Deep link error:", e);
-        } finally {
-          setIsProcessingUrl(false);
+          alert(`Login Error: ${e.message || "Unknown error"}`);
+          setStage('AUTH'); // Reset UI so user isn't stuck
         }
       };
 
@@ -107,18 +105,17 @@ function AuthWrapper() {
       App.addListener('appUrlOpen', (data) => handleUrl(data.url));
 
       // B. Check for "Missed" URLs (Cold Start)
-      // We wait 500ms to ensure the native bridge is fully ready
       setTimeout(async () => {
         const launchData = await App.getLaunchUrl();
         if (launchData && launchData.url) {
           console.log("🚀 Recovered Cold Start URL:", launchData.url);
           handleUrl(launchData.url);
         }
-      }, 500);
+      }, 500); // 500ms delay to ensure bridge is ready
     }
   }, []);
 
-  // 💡 3. DATA SYNC & STAGE MANAGEMENT
+  // 💡 3. DATA SYNC
   useEffect(() => {
     const fetchSession = async () => {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
@@ -132,7 +129,6 @@ function AuthWrapper() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (session?.user) {
-        // Only fetch if we don't have the user or it's a distinct login event
         if (!user || event === 'SIGNED_IN') {
           await fetchProfileAndHousehold(session.user);
         }
@@ -147,32 +143,18 @@ function AuthWrapper() {
   }, []);
 
   const fetchProfileAndHousehold = async (u: User) => {
-    // 1. Get Profile
     let profileData: { has_seen_tutorial: boolean, username?: string } | null = null;
-    let { data: profileRow, error: profileError } = await supabase
-      .from('profiles')
-      .select('has_seen_tutorial, username')
-      .eq('id', u.id)
-      .single();
+    let { data: profileRow, error: profileError } = await supabase.from('profiles').select('has_seen_tutorial, username').eq('id', u.id).single();
 
     if (profileRow) {
       profileData = profileRow;
     } else if (profileError && profileError.code === 'PGRST116') {
-      const { data: newProfileData } = await supabase
-        .from('profiles')
-        .insert({ id: u.id, has_seen_tutorial: false, username: u.email?.split('@')[0] || u.id })
-        .select('has_seen_tutorial, username')
-        .single();
+      const { data: newProfileData } = await supabase.from('profiles').insert({ id: u.id, has_seen_tutorial: false, username: u.email?.split('@')[0] || u.id }).select('has_seen_tutorial, username').single();
       profileData = newProfileData;
     }
 
-    // 2. Get Household
     let currentHousehold: Household | null = null;
-    const { data: householdData } = await supabase
-      .from("household_members")
-      .select("households(*)")
-      .eq("user_id", u.id)
-      .maybeSingle();
+    const { data: householdData } = await supabase.from("household_members").select("households(*)").eq("user_id", u.id).maybeSingle();
 
     if (householdData && householdData.households) {
       currentHousehold = Array.isArray(householdData.households) ? householdData.households[0] as Household : householdData.households as Household;
@@ -181,45 +163,37 @@ function AuthWrapper() {
     const mergedUser: UserProfile = { ...u, ...profileData! };
     setUser(mergedUser);
     setHousehold(currentHousehold);
-    determineStage(mergedUser, currentHousehold);
-  }
 
-  // 💡 4. STRICT STAGE LOGIC (Prevents Loops)
-  const determineStage = (u: UserProfile, h: Household | null) => {
-    if (!u) {
-      setStage('AUTH');
-      return;
-    }
-    // If they haven't seen tutorial, show it (High Priority)
-    if (!u.has_seen_tutorial) {
-      setStage('TUTORIAL');
-      return;
-    }
-    // If they have seen tutorial but no household, go to setup
-    if (!h) {
-      setStage('SETUP_HOUSEHOLD');
-      return;
-    }
-    // Otherwise, enter app
-    setStage('APP');
-  }
-
-  // 💡 5. STICKY TUTORIAL UPDATE
-  const handleTutorialComplete = async () => {
-    if (!user) return;
-
-    // 1. Optimistic Update: Update local state immediately so UI moves forward
-    const updatedUser = { ...user, has_seen_tutorial: true };
-    setUser(updatedUser);
-
-    // 2. Move stage immediately based on household status
-    if (household) {
-      setStage('APP');
+    // Explicit Stage Setting
+    if (currentHousehold) {
+      // Double check local storage for tutorial state
+      const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${u.id}`) : null;
+      if (mergedUser.has_seen_tutorial || localSeen) {
+        setStage('APP');
+      } else {
+        setStage('TUTORIAL');
+      }
     } else {
       setStage('SETUP_HOUSEHOLD');
     }
+  }
 
-    // 3. Background DB Update
+  // 💡 4. STICKY TUTORIAL FIX
+  const handleTutorialComplete = async () => {
+    if (!user) return;
+
+    // A. Optimistic Update (Immediate UI Change)
+    const updatedUser = { ...user, has_seen_tutorial: true };
+    setUser(updatedUser);
+
+    // B. Local Storage Backup (Prevents loop on restart)
+    localStorage.setItem(`tutorial_seen_${user.id}`, "true");
+
+    // C. Change Stage
+    if (household) setStage('APP');
+    else setStage('SETUP_HOUSEHOLD');
+
+    // D. Database Update (Background)
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   }
 
@@ -227,10 +201,8 @@ function AuthWrapper() {
     fetchProfileAndHousehold(u);
   }
 
-  // RENDER LOGIC
   switch (stage) {
-    case 'LOADING':
-      return <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white"><Loader2 className="w-10 h-10 animate-spin text-emerald-400" /></div>;
+    case 'LOADING': return <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white"><Loader2 className="w-10 h-10 animate-spin text-emerald-400 mb-4" /><p className="text-xs text-slate-500">{debugMsg}</p></div>;
     case 'WELCOME': return <OnboardingScreen onStart={() => setStage('AUTH')} />;
     case 'AUTH': return <AuthPage />;
     case 'TUTORIAL': return <Tutorial onComplete={handleTutorialComplete} />;
@@ -240,7 +212,7 @@ function AuthWrapper() {
   }
 }
 
-// --- AUTH PAGE COMPONENT ---
+// --- AUTH PAGE ---
 function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -278,7 +250,6 @@ function AuthPage() {
     return () => clearInterval(timer);
   }, []);
 
-  // 💡 REDIRECT LOGIC: Point to the Bounce Page for Native Apps
   const getRedirectUrl = () => {
     const isNative = typeof window !== 'undefined' && window.Capacitor?.isNative;
     if (isNative) {
