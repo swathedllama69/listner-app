@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google"; // 👈 Using a built-in Google Font instead
 import "./globals.css";
+import { Analytics } from "@vercel/analytics/next"
 
 // Configure the font (Standard, clean sans-serif)
 const inter = Inter({ subsets: ["latin"] });
@@ -25,6 +26,7 @@ export default function RootLayout({
         suppressHydrationWarning={true}
       >
         {children}
+        <Analytics />
       </body>
     </html>
   );
