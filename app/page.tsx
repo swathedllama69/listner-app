@@ -42,34 +42,45 @@ function AuthWrapper() {
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
 
-  // 💡 CRITICAL FIX: Listener handles both PKCE (Code) and Implicit (Hash) flows
+  // 💡 1. RESCUE LOGIC: If user gets stuck on Web Home with a token, throw them to App
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      const search = window.location.search;
+
+      // If we have login tokens BUT we are in a mobile browser (not the app)
+      const hasTokens = hash.includes('access_token') || search.includes('code');
+      const isNative = window.Capacitor?.isNative;
+      const isMobileWidth = window.innerWidth < 768;
+
+      if (hasTokens && !isNative && isMobileWidth) {
+        console.log("⚠️ Stuck on Web with tokens! Rescuing to App...");
+        // Force the deep link to open the app
+        window.location.href = `listner://callback${search}${hash}`;
+      }
+    }
+  }, []);
+
+  // 💡 2. NATIVE LISTENER: Handles "Warm Start" (App already running) AND "Cold Start"
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Capacitor?.isNative) {
-      const handleOpenUrl = async ({ url }: { url: string }) => {
-        console.log("App opened via URL:", url);
+
+      const handleUrl = async (url: string) => {
+        console.log("📲 Deep Link Detected:", url);
 
         try {
-          // 1. Handle PKCE "Code" Flow (The modern default from Supabase)
-          // URL looks like: listner://callback?code=...
+          // PKCE Flow (The modern default)
           if (url.includes('code=')) {
-            console.log("PKCE Code detected. Exchanging for session...");
-
-            // Extract the code from the query string
+            console.log("PKCE Code detected. Exchanging...");
             const params = new URLSearchParams(url.split('?')[1]);
             const code = params.get('code');
-
             if (code) {
-              const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-              if (error) {
-                console.error("Session exchange failed:", error);
-                throw error;
-              }
-              console.log("Session exchanged successfully!");
-              // The auth state listener below will pick up the new session automatically
+              const { error } = await supabase.auth.exchangeCodeForSession(code);
+              if (error) throw error;
+              console.log("✅ Session exchanged!");
             }
           }
-          // 2. Handle Legacy "Hash" Flow (Backup)
-          // URL looks like: listner://callback#access_token=...
+          // Implicit Flow (Backup)
           else if (url.includes('access_token')) {
             console.log("Hash tokens detected.");
             const hashIndex = url.indexOf('#');
@@ -83,15 +94,22 @@ function AuthWrapper() {
             }
           }
         } catch (e) {
-          console.error("Deep link handling error:", e);
+          console.error("Deep link error:", e);
         }
       };
 
-      App.addListener('appUrlOpen', handleOpenUrl);
+      // A. Listen for new URLs (while app is open)
+      App.addListener('appUrlOpen', (data) => handleUrl(data.url));
 
-      return () => {
-        App.removeAllListeners();
-      };
+      // B. Check if app was JUST opened via URL (Cold Start Check)
+      App.getLaunchUrl().then((launchData) => {
+        if (launchData && launchData.url) {
+          console.log("🚀 Cold Start via URL detected");
+          handleUrl(launchData.url);
+        }
+      });
+
+      return () => { App.removeAllListeners(); };
     }
   }, []);
 
@@ -241,6 +259,15 @@ function AuthPage() {
     return () => clearInterval(timer);
   }, []);
 
+  // 💡 REDIRECT LOGIC: Point to the Bounce Page for Native Apps
+  const getRedirectUrl = () => {
+    const isNative = typeof window !== 'undefined' && window.Capacitor?.isNative;
+    if (isNative) {
+      return 'https://listner.vercel.app/auth/redirect';
+    }
+    return typeof window !== 'undefined' ? window.location.origin : '';
+  };
+
   const handleAuth = async (mode: 'signin' | 'signup') => {
     setLoading(true); setError(null); setSuccessMsg(null);
     try {
@@ -278,16 +305,6 @@ function AuthPage() {
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
   }
 
-  // 💡 REDIRECT LOGIC: Point to the Bounce Page for Native Apps
-  const getRedirectUrl = () => {
-    const isNative = typeof window !== 'undefined' && window.Capacitor?.isNative;
-    if (isNative) {
-      // IMPORTANT: This URL must match the page you deployed to Vercel in app/auth/redirect
-      return 'https://listner.vercel.app/auth/redirect';
-    }
-    return typeof window !== 'undefined' ? window.location.origin : '';
-  };
-
   const handleGoogleLogin = async () => {
     setLoading(true);
     const redirectTo = getRedirectUrl();
@@ -307,7 +324,6 @@ function AuthPage() {
 
   return (
     <div className="relative min-h-screen w-full flex overflow-hidden bg-slate-50">
-      {/* ... (Styles kept same) ... */}
       <style jsx global>{`
         @keyframes blob { 0%, 100% { transform: translate(0, 0) scale(1); } 25% { transform: translate(-200px, 150px) scale(1.1); } 50% { transform: translate(250px, -150px) scale(0.9); } 75% { transform: translate(-150px, -100px) scale(1.2); } }
         .animation-delay-2000 { animation-delay: 2s; }
