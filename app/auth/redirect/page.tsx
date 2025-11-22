@@ -5,36 +5,37 @@ import { useRouter } from "next/navigation";
 
 export default function BouncePage() {
     const [status, setStatus] = useState("Analyzing login data...");
-    const [debugInfo, setDebugInfo] = useState("Waiting for tokens...");
+    const [debugInfo, setDebugInfo] = useState("Waiting...");
     const router = useRouter();
 
     useEffect(() => {
-        // Safety check
         if (typeof window === 'undefined') return;
 
-        // 1. Get the hash (tokens)
+        // 💡 FIX: Capture both Hash (Implicit) and Search (PKCE Code)
         const hash = window.location.hash;
-        setDebugInfo(hash ? "✅ Tokens Received" : "❌ No Tokens Found");
+        const search = window.location.search; // Contains ?code=...
 
-        if (!hash) {
+        if (!hash && !search) {
             setStatus("Login failed. No session data found.");
-            // Optional: Send back to home if truly failed
-            // setTimeout(() => router.push('/'), 3000); 
+            setDebugInfo("❌ URL is empty (No code or tokens)");
             return;
         }
 
-        // 2. Construct the Deep Link
-        const deepLink = `listner://callback${hash}`;
+        setDebugInfo(search ? `✅ Code found: ${search.substring(0, 10)}...` : "✅ Hash found");
+
+        // 💡 FIX: Construct deep link with EVERYTHING
+        // This turns https://.../redirect?code=123 into listner://callback?code=123
+        const deepLink = `listner://callback${search}${hash}`;
+
         setStatus("🚀 Launching App...");
 
-        // 3. Attempt Auto-Redirect
+        // Attempt Auto-Redirect
         window.location.href = deepLink;
 
-        // 4. Fallback Timer
-        // We do NOT redirect to home here, so you can test the button manually.
+        // Fallback timer
         const timer = setTimeout(() => {
-            setStatus("⚠️ Auto-launch blocked by browser? Tap the button below.");
-        }, 3000);
+            setStatus("Tap the button below to open the app.");
+        }, 2000);
 
         return () => clearTimeout(timer);
     }, [router]);
@@ -42,32 +43,29 @@ export default function BouncePage() {
     return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white p-6 text-center">
             <h1 className="text-2xl font-bold mb-2 text-emerald-400">Completing Login...</h1>
-
-            <p className="text-slate-400 mb-8 max-w-md mx-auto">
-                {status}
-            </p>
-
-            {/* Debug Info */}
-            <div className="mb-8 p-2 bg-slate-900 rounded text-xs text-slate-500 font-mono">
+            <p className="text-slate-400 mb-8">{status}</p>
+            <div className="mb-8 p-2 bg-slate-900 rounded text-xs text-slate-500 font-mono border border-slate-800">
                 Debug: {debugInfo}
             </div>
 
-            <div className="flex flex-col gap-4 w-full max-w-xs">
-                {/* MANUAL LAUNCH BUTTON */}
-                <a
-                    href={`listner://callback${typeof window !== 'undefined' ? window.location.hash : ''}`}
-                    className="w-full px-6 py-4 bg-emerald-600 hover:bg-emerald-500 active:scale-95 rounded-xl font-bold text-lg shadow-lg shadow-emerald-900/20 flex items-center justify-center transition-all"
-                >
-                    Open ListNer App
-                </a>
-
-                <button
-                    onClick={() => router.push('/')}
-                    className="text-sm text-slate-500 hover:text-slate-300 mt-4 underline"
-                >
-                    Stuck? Continue on Web
-                </button>
-            </div>
+            {/* 💡 FIX: Ensure button uses the calculated deep link dynamically */}
+            <ButtonLink />
         </div>
+    );
+}
+
+// Helper to safely grab window location for the button
+function ButtonLink() {
+    const [href, setHref] = useState("#");
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            setHref(`listner://callback${window.location.search}${window.location.hash}`);
+        }
+    }, []);
+
+    return (
+        <a href={href} className="w-full max-w-xs px-6 py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-lg shadow-lg shadow-emerald-900/20 flex items-center justify-center">
+            Open ListNer App
+        </a>
     );
 }

@@ -36,21 +36,42 @@ export default function Home() {
   return <AuthWrapper />;
 }
 
-// --- AUTH WRAPPER ---
+// --- AUTH WRAPPER (Handles WELCOME, AUTH, TUTORIAL Flow) ---
 function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
 
-  // 💡 LISTENER: Catches 'listner://callback#...'
+  // 💡 CRITICAL FIX: Listener handles both PKCE (Code) and Implicit (Hash) flows
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Capacitor?.isNative) {
       const handleOpenUrl = async ({ url }: { url: string }) => {
         console.log("App opened via URL:", url);
 
-        // If url contains tokens, manually set the session
-        if (url.includes('access_token') && url.includes('refresh_token')) {
-          try {
+        try {
+          // 1. Handle PKCE "Code" Flow (The modern default from Supabase)
+          // URL looks like: listner://callback?code=...
+          if (url.includes('code=')) {
+            console.log("PKCE Code detected. Exchanging for session...");
+
+            // Extract the code from the query string
+            const params = new URLSearchParams(url.split('?')[1]);
+            const code = params.get('code');
+
+            if (code) {
+              const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+              if (error) {
+                console.error("Session exchange failed:", error);
+                throw error;
+              }
+              console.log("Session exchanged successfully!");
+              // The auth state listener below will pick up the new session automatically
+            }
+          }
+          // 2. Handle Legacy "Hash" Flow (Backup)
+          // URL looks like: listner://callback#access_token=...
+          else if (url.includes('access_token')) {
+            console.log("Hash tokens detected.");
             const hashIndex = url.indexOf('#');
             const hash = url.substring(hashIndex + 1);
             const params = new URLSearchParams(hash);
@@ -58,20 +79,19 @@ function AuthWrapper() {
             const refresh_token = params.get('refresh_token');
 
             if (access_token && refresh_token) {
-              console.log("Deep link tokens found. Setting session.");
-              await supabase.auth.setSession({
-                access_token,
-                refresh_token,
-              });
+              await supabase.auth.setSession({ access_token, refresh_token });
             }
-          } catch (e) {
-            console.error("Error parsing deep link:", e);
           }
+        } catch (e) {
+          console.error("Deep link handling error:", e);
         }
       };
 
       App.addListener('appUrlOpen', handleOpenUrl);
-      return () => { App.removeAllListeners(); };
+
+      return () => {
+        App.removeAllListeners();
+      };
     }
   }, []);
 
@@ -150,19 +170,30 @@ function AuthWrapper() {
   }
 
   const handleTutorialComplete = async () => {
-    const { data: updatedProfile, error } = await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user!.id).select('has_seen_tutorial, username').single();
+    const { data: updatedProfile, error } = await supabase
+      .from('profiles')
+      .update({ has_seen_tutorial: true })
+      .eq('id', user!.id)
+      .select('has_seen_tutorial, username')
+      .single();
+
     if (!error && updatedProfile) {
-      setUser({ ...user!, ...updatedProfile });
+      const mergedUser: UserProfile = { ...user!, ...updatedProfile };
+      setUser(mergedUser);
       setStage('SETUP_HOUSEHOLD');
     } else {
       setStage('SETUP_HOUSEHOLD');
     }
   }
 
-  const handleHouseholdCreated = (u: User) => { fetchProfileAndHousehold(u); }
+  const handleHouseholdCreated = (u: User) => {
+    fetchProfileAndHousehold(u);
+  }
 
+  // RENDER LOGIC
   switch (stage) {
-    case 'LOADING': return <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white"><Loader2 className="w-10 h-10 animate-spin text-emerald-400" /></div>;
+    case 'LOADING':
+      return <div className="flex items-center justify-center min-h-screen bg-slate-900 text-white"><Loader2 className="w-10 h-10 animate-spin text-emerald-400" /></div>;
     case 'WELCOME': return <OnboardingScreen onStart={() => setStage('AUTH')} />;
     case 'AUTH': return <AuthPage />;
     case 'TUTORIAL': return <Tutorial onComplete={handleTutorialComplete} />;
@@ -210,22 +241,11 @@ function AuthPage() {
     return () => clearInterval(timer);
   }, []);
 
-  // 💡 REDIRECT STRATEGY: Point to Bounce Page
-  const getRedirectUrl = () => {
-    const isNative = typeof window !== 'undefined' && window.Capacitor?.isNative;
-    if (isNative) {
-      // Must match your Vercel URL + the bounce path
-      return 'https://listner.vercel.app/auth/redirect';
-    }
-    return typeof window !== 'undefined' ? window.location.origin : '';
-  };
-
   const handleAuth = async (mode: 'signin' | 'signup') => {
     setLoading(true); setError(null); setSuccessMsg(null);
     try {
-      const redirectTo = getRedirectUrl();
       if (mode === 'signup') {
-        const { error } = await supabase.auth.signUp({ email, password, options: { emailRedirectTo: redirectTo } });
+        const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
         setSuccessMsg("Account created! Check email to confirm.");
       } else {
@@ -233,7 +253,12 @@ function AuthPage() {
           const { error } = await supabase.auth.signInWithPassword({ email, password });
           if (error) throw error;
         } else {
-          const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
+          // Standard Web Redirect for magic link (will use custom deep link if native)
+          const redirectTo = getRedirectUrl();
+          const { error } = await supabase.auth.signInWithOtp({
+            email,
+            options: { emailRedirectTo: redirectTo }
+          });
           if (error) throw error;
           setSuccessMsg("Magic link sent! Check email.");
         }
@@ -241,29 +266,48 @@ function AuthPage() {
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
   }
 
-  const handleGoogleLogin = async () => {
-    setLoading(true);
-    const redirectTo = getRedirectUrl();
-    try {
-      await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: { redirectTo: redirectTo }
-      });
-    } catch (error) { console.error("Google sign in error:", error); setLoading(false); }
-  }
-
   const handleResetPassword = async () => {
     setLoading(true); setError(null); setSuccessMsg(null);
     const redirectTo = getRedirectUrl();
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${redirectTo}/reset-password` });
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${redirectTo}/reset-password`
+      });
       if (error) throw error;
       setSuccessMsg("Reset link sent to your email.");
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
   }
 
+  // 💡 REDIRECT LOGIC: Point to the Bounce Page for Native Apps
+  const getRedirectUrl = () => {
+    const isNative = typeof window !== 'undefined' && window.Capacitor?.isNative;
+    if (isNative) {
+      // IMPORTANT: This URL must match the page you deployed to Vercel in app/auth/redirect
+      return 'https://listner.vercel.app/auth/redirect';
+    }
+    return typeof window !== 'undefined' ? window.location.origin : '';
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    const redirectTo = getRedirectUrl();
+
+    try {
+      await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectTo
+        }
+      });
+    } catch (error) {
+      console.error("Google sign in error:", error);
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="relative min-h-screen w-full flex overflow-hidden bg-slate-50">
+      {/* ... (Styles kept same) ... */}
       <style jsx global>{`
         @keyframes blob { 0%, 100% { transform: translate(0, 0) scale(1); } 25% { transform: translate(-200px, 150px) scale(1.1); } 50% { transform: translate(250px, -150px) scale(0.9); } 75% { transform: translate(-150px, -100px) scale(1.2); } }
         .animation-delay-2000 { animation-delay: 2s; }
@@ -305,6 +349,7 @@ function AuthPage() {
         {/* Left Side */}
         <div className="hidden lg:flex w-1/2 h-screen flex-col justify-between p-16 text-slate-800 bg-slate-100/50">
           <div className="flex items-center gap-4">
+            {/* Logo Size increased to w-32 h-32 */}
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-32 h-32 object-contain" />
             <span className="text-4xl font-bold tracking-tight">ListNer.</span>
           </div>
