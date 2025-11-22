@@ -21,7 +21,6 @@ import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Share2, Settings, C
 const categories = ["Item", "Project", "Vacation", "Other"]
 const priorities = ["High", "Medium", "Low"]
 
-// --- HELPER FUNCTIONS (Missing in previous version) ---
 const getPriorityCardStyle = (p: string) => {
     switch (p) {
         case 'High': return 'bg-rose-50 border-rose-200';
@@ -72,8 +71,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [items, setItems] = useState<WishlistItem[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [activeTab, setActiveTab] = useState("All")
-
-    // Pagination State
     const [page, setPage] = useState(1);
     const ITEMS_PER_PAGE = 5;
 
@@ -124,9 +121,8 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const handleRenameList = async () => {
         const { error } = await supabase.from('lists').update({ name: listNameForm }).eq('id', list.id);
         if (!error) {
-            setListSettings(prev => ({ ...prev, name: listNameForm }));
+            setListSettings({ ...listSettings, name: listNameForm }); // Local Update
             setIsRenameOpen(false);
-            // No reload here to prevent app refresh
         }
     }
 
@@ -182,7 +178,8 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             setItems(items.filter(item => item.id !== deleteConfirm.id));
         } else if (deleteConfirm.type === 'list') {
             await supabase.from('lists').delete().eq('id', list.id);
-            window.location.reload(); // Reloading on list delete is acceptable as we need to go back
+            // For List Delete, we reload to go back to dashboard cleanly as the parent component holds the list
+            window.location.reload();
         }
         setDeleteConfirm(null);
     }

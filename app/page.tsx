@@ -43,7 +43,6 @@ function AuthWrapper() {
   const [household, setHousehold] = useState<Household | null>(null);
   const [debugMsg, setDebugMsg] = useState("");
 
-  // Prevent duplicate listeners in React Strict Mode
   const listenersInitialized = useRef(false);
 
   // 💡 1. RESCUE LOGIC (Web Fallback)
@@ -62,7 +61,7 @@ function AuthWrapper() {
     }
   }, []);
 
-  // 💡 2. NATIVE LISTENER (The Fix)
+  // 💡 2. NATIVE LISTENER (Aggressive Check)
   useEffect(() => {
     if (typeof window !== 'undefined' && window.Capacitor?.isNative && !listenersInitialized.current) {
       listenersInitialized.current = true;
@@ -72,7 +71,6 @@ function AuthWrapper() {
         setDebugMsg("Processing login...");
 
         try {
-          // PKCE Flow
           if (url.includes('code=')) {
             const params = new URLSearchParams(url.split('?')[1]);
             const code = params.get('code');
@@ -82,7 +80,6 @@ function AuthWrapper() {
               setDebugMsg("Session exchanged!");
             }
           }
-          // Implicit Flow
           else if (url.includes('access_token')) {
             const hashIndex = url.indexOf('#');
             const hash = url.substring(hashIndex + 1);
@@ -96,22 +93,27 @@ function AuthWrapper() {
           }
         } catch (e: any) {
           console.error("Deep link error:", e);
-          alert(`Login Error: ${e.message || "Unknown error"}`);
-          setStage('AUTH'); // Reset UI so user isn't stuck
+          alert(`Login Error: ${e.message}`);
+          setStage('AUTH');
         }
       };
 
       // A. Listen for new URLs (Warm Start)
       App.addListener('appUrlOpen', (data) => handleUrl(data.url));
 
-      // B. Check for "Missed" URLs (Cold Start)
-      setTimeout(async () => {
+      // B. Check for "Missed" URLs (Multiple Retries for Slow Devices)
+      const checkLaunchUrl = async () => {
         const launchData = await App.getLaunchUrl();
         if (launchData && launchData.url) {
           console.log("🚀 Recovered Cold Start URL:", launchData.url);
           handleUrl(launchData.url);
         }
-      }, 500); // 500ms delay to ensure bridge is ready
+      };
+
+      // Check immediately, then at 500ms, then at 2000ms to catch it whenever the bridge is ready
+      checkLaunchUrl();
+      setTimeout(checkLaunchUrl, 500);
+      setTimeout(checkLaunchUrl, 2000);
     }
   }, []);
 
@@ -161,14 +163,19 @@ function AuthWrapper() {
     }
 
     const mergedUser: UserProfile = { ...u, ...profileData! };
+
+    // 💡 CRITICAL TUTORIAL FIX: Trust Local Storage over DB for the 'seen' flag
+    // This prevents the tutorial from showing again if the DB update is slow
+    const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${u.id}`) : null;
+    if (localSeen === 'true') {
+      mergedUser.has_seen_tutorial = true;
+    }
+
     setUser(mergedUser);
     setHousehold(currentHousehold);
 
-    // Explicit Stage Setting
     if (currentHousehold) {
-      // Double check local storage for tutorial state
-      const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${u.id}`) : null;
-      if (mergedUser.has_seen_tutorial || localSeen) {
+      if (mergedUser.has_seen_tutorial) {
         setStage('APP');
       } else {
         setStage('TUTORIAL');
@@ -178,22 +185,21 @@ function AuthWrapper() {
     }
   }
 
-  // 💡 4. STICKY TUTORIAL FIX
   const handleTutorialComplete = async () => {
     if (!user) return;
 
-    // A. Optimistic Update (Immediate UI Change)
+    // 1. Optimistic Update (Immediate)
     const updatedUser = { ...user, has_seen_tutorial: true };
     setUser(updatedUser);
 
-    // B. Local Storage Backup (Prevents loop on restart)
+    // 2. Save to Local Storage (Permanent local flag)
     localStorage.setItem(`tutorial_seen_${user.id}`, "true");
 
-    // C. Change Stage
+    // 3. Move Stage Immediately
     if (household) setStage('APP');
     else setStage('SETUP_HOUSEHOLD');
 
-    // D. Database Update (Background)
+    // 4. Update DB in Background
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   }
 

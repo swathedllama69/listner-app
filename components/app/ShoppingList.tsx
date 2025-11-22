@@ -133,7 +133,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
     const handleRenameList = async () => {
         const { error } = await supabase.from('lists').update({ name: listSettings.name }).eq('id', list.id);
-        if (!error) setIsRenameOpen(false);
+        if (!error) { setIsRenameOpen(false); }
     }
 
     const handleTogglePrivacy = async () => {
@@ -149,6 +149,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             setItems(items.filter(item => item.id !== deleteConfirm.id));
         } else if (deleteConfirm.type === 'list') {
             await supabase.from('lists').delete().eq('id', list.id);
+            // Reloading on list delete is acceptable as we need to go back
             window.location.reload();
         } else if (deleteConfirm.type === 'bulk') {
             await supabase.from("shopping_items").delete().in("id", selectedItems);
