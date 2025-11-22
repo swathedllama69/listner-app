@@ -1,9 +1,6 @@
-/** @type {import('next').NextConfig} */
-const nextConfig = {
-  // Keeps your console quiet during dev
-  turbopack: {},
+import type { NextConfig } from "next";
 
-  // Allow images from Supabase (good to have for future)
+const nextConfig: NextConfig = {
   images: {
     remotePatterns: [
       {
