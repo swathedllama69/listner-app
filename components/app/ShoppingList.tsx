@@ -408,11 +408,27 @@ function EditShoppingItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
     const handleChange = (e: ChangeEvent<HTMLInputElement>) => setForm({ ...form, [e.target.name]: e.target.value });
     const handleSubmit = (e: FormEvent) => { e.preventDefault(); onUpdate(form); };
     return (
-        <DialogContent className="sm:max-w-md rounded-2xl"><DialogHeader><DialogTitle>Edit Item</DialogTitle></DialogHeader><form onSubmit={handleSubmit} className="space-y-4"><div className="grid grid-cols-4 gap-3"><div className="col-span-3"><Label>Item Name</Label><Input value={form.name} onChange={handleChange} name="name" className="h-11" /></div><div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={handleChange} name="quantity" className="h-11 text-center" /></div></div><div className="grid grid-cols-2 gap-3"><div><Label>Price ({currencySymbol})</Label><Input type="number" value={form.price} onChange={handleChange} name="price" className="h-11" /></div>
-            <div>
-                <Label>Priority</Label>
-                <Select value={form.priority as any} onValueChange={(v) => setForm({ ...form, priority: v })}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select>
-            </div>
-        </div><div><Label>Notes</Label><Input value={form.notes} onChange={handleChange} name="notes" className="h-11" /></div><DialogFooter><Button type="submit" className="w-full h-11 bg-blue-600">Save Changes</Button></DialogFooter></form></DialogContent>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+            <DialogHeader><DialogTitle>Edit Item</DialogTitle></DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="grid grid-cols-4 gap-3">
+                    <div className="col-span-3"><Label>Item Name</Label><Input value={form.name} onChange={handleChange} name="name" className="h-11" /></div>
+                    <div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={handleChange} name="quantity" className="h-11 text-center" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                    <div><Label>Price ({currencySymbol})</Label><Input type="number" value={form.price} onChange={handleChange} name="price" className="h-11" /></div>
+                    <div>
+                        <Label>Priority</Label>
+                        {/* FIX APPLIED BELOW: added 'as any' to the value change */}
+                        <Select value={form.priority as any} onValueChange={(v) => setForm({ ...form, priority: v as any })}>
+                            <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
+                            <SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                        </Select>
+                    </div>
+                </div>
+                <div><Label>Notes</Label><Input value={form.notes} onChange={handleChange} name="notes" className="h-11" /></div>
+                <DialogFooter><Button type="submit" className="w-full h-11 bg-blue-600">Save Changes</Button></DialogFooter>
+            </form>
+        </DialogContent>
     )
 }
