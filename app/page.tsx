@@ -10,7 +10,7 @@ import { CreateHouseholdForm } from '@/components/app/CreateHouseholdForm';
 import { Household } from '@/lib/types';
 import {
   Loader2, ShieldCheck, Users, Mail, Lock, Wand2, ArrowLeft,
-  CheckCircle2, ArrowRight, ListChecks, ShoppingCart, Wallet, AlertTriangle, RefreshCw, LogOut
+  CheckCircle2, ArrowRight, ListChecks, ShoppingCart, Wallet, AlertTriangle, LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,19 +44,34 @@ function AuthWrapper() {
 
   // --- HELPER: PROCESS URL ---
   const handleUrl = async (url: string) => {
+    // 1. Prevent "Stale Link" Loop on Restart
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user) {
+      console.log("✅ Already logged in. Ignoring deep link.");
+      // If we are stuck in LOADING/AUTH but actually logged in, force fetch
+      if (stage !== 'APP') await fetchProfileAndHousehold(session.user);
+      return;
+    }
+
+    // 2. Prevent Double Processing (within same session)
     if (processedUrls.current.has(url)) return;
     processedUrls.current.add(url);
 
-    console.log("📲 Deep Link Detected:", url);
+    // 3. Force UI to Loading (so user sees progress)
+    setStage('LOADING');
     setDebugMsg("Processing Login...");
+    console.log("📲 Deep Link Detected:", url);
 
     try {
+      let newData = null;
+
       if (url.includes('code=')) {
         const params = new URLSearchParams(url.split('?')[1]);
         const code = params.get('code');
         if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
+          newData = data;
           setDebugMsg("Session exchanged...");
         }
       }
@@ -68,20 +83,28 @@ function AuthWrapper() {
         const refresh_token = params.get('refresh_token');
 
         if (access_token && refresh_token) {
-          const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+          const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
           if (error) throw error;
+          newData = data;
           setDebugMsg("Session tokens set...");
         }
       }
+
+      // 4. Direct Handoff (Don't wait for event listener)
+      if (newData?.user) {
+        setDebugMsg("Fetching Profile...");
+        await fetchProfileAndHousehold(newData.user);
+      }
+
     } catch (e: any) {
       console.error("Deep link error:", e);
       if (!e.message?.includes('flow state')) {
         setErrorDetails(e.message);
         setStage('ERROR');
       } else {
-        // Recover from "flow state" error by checking if we are actually logged in
+        // If flow state error, likely a duplicate click. Check if we are good.
         const { data } = await supabase.auth.getUser();
-        if (data.user) fetchProfileAndHousehold(data.user);
+        if (data.user) await fetchProfileAndHousehold(data.user);
       }
     }
   };
@@ -104,12 +127,19 @@ function AuthWrapper() {
   useEffect(() => {
     if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
       listenersInitialized.current = true;
+
+      // Live Listener
       App.addListener('appUrlOpen', (data) => handleUrl(data.url));
 
+      // Cold Start Check
       const checkLaunchUrl = async () => {
         const launchData = await App.getLaunchUrl();
-        if (launchData?.url) handleUrl(launchData.url);
+        if (launchData?.url) {
+          console.log("🚀 Cold Start URL found");
+          handleUrl(launchData.url);
+        }
       };
+      // Check immediately and again shortly after to be safe
       checkLaunchUrl();
       setTimeout(checkLaunchUrl, 1000);
     }
@@ -129,10 +159,10 @@ function AuthWrapper() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        await fetchProfileAndHousehold(session.user);
+        // Only fetch if we aren't already (prevent double fetch race condition)
+        if (!user) await fetchProfileAndHousehold(session.user);
       } else if (event === 'SIGNED_OUT') {
-        // 💡 HARD RELOAD ON LOGOUT to clear all states
-        window.location.reload();
+        window.location.reload(); // Hard reload to clear state
       }
     });
 
@@ -141,34 +171,29 @@ function AuthWrapper() {
 
   const fetchProfileAndHousehold = async (u: User) => {
     try {
-      setDebugMsg("Loading Profile...");
-
-      // 1. Get or Create Profile (Using UPSERT to avoid "duplicate key" errors)
+      // 💡 FIX: Robust Profile Upsert
       let username = u.email?.split('@')[0] || 'user';
-      if (username.length < 3) username = username + '_user'; // Fix short username issue
+      if (username.length < 3) username = username + '_user';
 
-      const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
-        .upsert({
-          id: u.id,
-          email: u.email,
-          username: username,
-          // Only set 'has_seen_tutorial' if it doesn't exist, otherwise keep current
-        }, { onConflict: 'id', ignoreDuplicates: false })
-        .select('has_seen_tutorial, username')
-        .single();
+      // Try to get existing profile first
+      let { data: profileData } = await supabase.from('profiles').select('has_seen_tutorial, username').eq('id', u.id).single();
 
-      // If upsert fails (rare), try to just select
-      let finalProfile = profileData;
-      if (!finalProfile) {
-        const { data: existing } = await supabase.from('profiles').select('has_seen_tutorial, username').eq('id', u.id).single();
-        finalProfile = existing;
-      }
+      // If not found, creating it
+      if (!profileData) {
+        setDebugMsg("Creating Profile...");
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: u.id,
+            email: u.email,
+            username: username,
+            has_seen_tutorial: false
+          }, { onConflict: 'id' })
+          .select('has_seen_tutorial, username')
+          .single();
 
-      // If still no profile, we have a problem
-      if (!finalProfile) {
-        // Fallback object so app doesn't crash
-        finalProfile = { has_seen_tutorial: false, username: username };
+        if (createError) throw createError;
+        profileData = newProfile;
       }
 
       setDebugMsg("Loading Household...");
@@ -179,13 +204,14 @@ function AuthWrapper() {
         currentHousehold = Array.isArray(householdData.households) ? householdData.households[0] as Household : householdData.households as Household;
       }
 
-      const mergedUser: UserProfile = { ...u, ...finalProfile };
+      const mergedUser: UserProfile = { ...u, ...profileData! };
       const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${u.id}`) : null;
       if (localSeen === 'true') mergedUser.has_seen_tutorial = true;
 
       setUser(mergedUser);
       setHousehold(currentHousehold);
 
+      // Transition to App
       if (currentHousehold) {
         setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
       } else {
@@ -209,8 +235,14 @@ function AuthWrapper() {
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   }
 
-  // 💡 Safe Area Wrapper Style
-  const safeAreaClass = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]";
+  const handleHouseholdCreated = (u: User) => {
+    fetchProfileAndHousehold(u);
+  }
+
+  // 💡 Safe Area CSS (Fixes button tucked to bottom)
+  // pt-safe-top adds padding for notch/status bar
+  // pb-safe-bottom adds padding for home swipe indicator
+  const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
 
   switch (stage) {
     case 'LOADING': return (
@@ -221,7 +253,7 @@ function AuthWrapper() {
       </div>
     );
     case 'ERROR': return (
-      <div className={`flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6 text-center ${safeAreaClass}`}>
+      <div className={`flex flex-col items-center justify-center bg-slate-50 p-6 text-center ${safeAreaWrapper}`}>
         <div className="bg-rose-100 p-4 rounded-full mb-4"><AlertTriangle className="w-8 h-8 text-rose-600" /></div>
         <h2 className="text-xl font-bold text-slate-900 mb-2">Unable to Load</h2>
         <p className="text-sm text-slate-500 mb-6">We ran into an issue loading your data.</p>
@@ -233,11 +265,11 @@ function AuthWrapper() {
       </div>
     );
     case 'WELCOME': return <OnboardingScreen onStart={() => setStage('AUTH')} />;
-    case 'AUTH': return <div className={safeAreaClass}><AuthPage /></div>;
-    case 'TUTORIAL': return <div className={safeAreaClass}><Tutorial onComplete={handleTutorialComplete} /></div>;
-    case 'SETUP_HOUSEHOLD': return <div className={safeAreaClass}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => fetchProfileAndHousehold(u)} /></div>;
+    case 'AUTH': return <div className={safeAreaWrapper}><AuthPage /></div>;
+    case 'TUTORIAL': return <div className={safeAreaWrapper}><Tutorial onComplete={handleTutorialComplete} /></div>;
+    case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={handleHouseholdCreated} /></div>;
     case 'APP': return (
-      <div className={`h-screen flex flex-col ${safeAreaClass}`}>
+      <div className={safeAreaWrapper}>
         <Dashboard user={user!} household={household!} />
       </div>
     );
@@ -284,7 +316,6 @@ function AuthPage() {
   }, []);
 
   const getRedirectUrl = () => {
-    // 💡 Fix for 'Capacitor' undefined error
     const isNative = Capacitor.isNativePlatform();
     if (isNative) {
       return 'https://listner.vercel.app/auth/redirect';
@@ -350,7 +381,7 @@ function AuthPage() {
   }
 
   return (
-    <div className="relative min-h-screen w-full flex overflow-hidden bg-slate-50">
+    <div className="relative flex-1 flex overflow-hidden bg-slate-50">
       <style jsx global>{`
         @keyframes blob { 0%, 100% { transform: translate(0, 0) scale(1); } 25% { transform: translate(-200px, 150px) scale(1.1); } 50% { transform: translate(250px, -150px) scale(0.9); } 75% { transform: translate(-150px, -100px) scale(1.2); } }
         .animation-delay-2000 { animation-delay: 2s; }
@@ -411,7 +442,7 @@ function AuthPage() {
         </div>
 
         {/* Right Side */}
-        <div className="w-full lg:w-1/2 h-screen flex flex-col items-center justify-center p-6">
+        <div className="w-full lg:w-1/2 h-full flex flex-col items-center justify-center p-6">
           <div className="lg:hidden mb-8 flex flex-col items-center">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-16 h-16 mb-4 object-contain" />
             <h2 className="text-3xl font-bold text-slate-900 tracking-tight">ListNer.</h2>

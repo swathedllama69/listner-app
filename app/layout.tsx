@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Analytics } from "@vercel/analytics/next"
@@ -13,6 +13,15 @@ export const metadata: Metadata = {
   },
 };
 
+// 💡 FIX: This tells the app to handle the "Safe Areas" (Notch/Swipe Bar) correctly.
+// Without this, your buttons get pushed off the screen or covered by the Android UI.
+export const viewport: Viewport = {
+  initialScale: 1,
+  width: 'device-width',
+  maximumScale: 1,
+  viewportFit: 'cover',
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -25,7 +34,7 @@ export default function RootLayout({
         suppressHydrationWarning={true}
       >
         {children}
-        {<Analytics />}
+        <Analytics />
       </body>
     </html>
   );
