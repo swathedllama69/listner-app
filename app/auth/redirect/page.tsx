@@ -1,39 +1,71 @@
 "use client";
 
-import { useEffect } from "react";
-import { supabase } from '@/lib/supabase';
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 
-// This page is a simple handshake. It allows the Supabase client to read the session 
-// and then immediately sends the user back to the app root.
-export default function AuthRedirectPage() {
+export default function BouncePage() {
+    const [status, setStatus] = useState("Analyzing login data...");
+    const [debugInfo, setDebugInfo] = useState("Waiting...");
+    const router = useRouter();
+
     useEffect(() => {
-        const handleRedirect = async () => {
-            // 1. Force the Supabase client to check the current URL for session tokens/code.
-            // This is crucial for PWA/Web. Supabase handles the session exchange/saving internally.
-            await supabase.auth.getSession();
+        if (typeof window === 'undefined') return;
 
-            // 2. Redirect back to the app root. 
-            // The app root (app/page.tsx) will then detect the session saved in localStorage.
-            // We use replace to prevent the redirect page from sitting in history.
-            window.location.replace(window.location.origin);
-        };
+        // 💡 FIX: Capture both Hash (Implicit) and Search (PKCE Code)
+        const hash = window.location.hash;
+        const search = window.location.search; // Contains ?code=...
 
-        handleRedirect();
+        if (!hash && !search) {
+            setStatus("Login failed. No session data found.");
+            setDebugInfo("❌ URL is empty (No code or tokens)");
+            return;
+        }
 
+        setDebugInfo(search ? `✅ Code found: ${search.substring(0, 10)}...` : "✅ Hash found");
+
+        // 💡 FIX: Construct deep link with EVERYTHING
+        // This turns https://.../redirect?code=123 into listner://callback?code=123
+        const deepLink = `listner://callback${search}${hash}`;
+
+        setStatus("🚀 Launching App...");
+
+        // Attempt Auto-Redirect
+        window.location.href = deepLink;
+
+        // Fallback timer
+        const timer = setTimeout(() => {
+            setStatus("Tap the button below to open the app.");
+        }, 2000);
+
+        return () => clearTimeout(timer);
+    }, [router]);
+
+    return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white p-6 text-center">
+            <h1 className="text-2xl font-bold mb-2 text-emerald-400">Completing Login...</h1>
+            <p className="text-slate-400 mb-8">{status}</p>
+            <div className="mb-8 p-2 bg-slate-900 rounded text-xs text-slate-500 font-mono border border-slate-800">
+                Debug: {debugInfo}
+            </div>
+
+            {/* 💡 FIX: Ensure button uses the calculated deep link dynamically */}
+            <ButtonLink />
+        </div>
+    );
+}
+
+// Helper to safely grab window location for the button
+function ButtonLink() {
+    const [href, setHref] = useState("#");
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            setHref(`listner://callback${window.location.search}${window.location.hash}`);
+        }
     }, []);
 
-    // Display minimal UI while the redirect happens
     return (
-        <div style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            height: '100vh',
-            flexDirection: 'column',
-            fontFamily: 'sans-serif'
-        }}>
-            <h1 style={{ fontSize: '1.5em' }}>Completing Login...</h1>
-            <p style={{ fontSize: '0.8em', color: '#666' }}>Returning to ListNer app. If you are not redirected, please refresh the page.</p>
-        </div>
+        <a href={href} className="w-full max-w-xs px-6 py-4 bg-emerald-600 hover:bg-emerald-500 rounded-xl font-bold text-lg shadow-lg shadow-emerald-900/20 flex items-center justify-center">
+            Open ListNer App
+        </a>
     );
 }
