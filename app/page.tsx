@@ -31,7 +31,6 @@ export default function Home() {
   return <AuthWrapper />;
 }
 
-// --- AUTH WRAPPER ---
 function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP' | 'ERROR'>('LOADING');
@@ -42,28 +41,82 @@ function AuthWrapper() {
   const listenersInitialized = useRef(false);
   const processedUrls = useRef<Set<string>>(new Set());
 
-  // --- HELPER: PROCESS URL ---
-  const handleUrl = async (url: string) => {
-    // 1. Prevent "Stale Link" Loop on Restart
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session?.user) {
-      console.log("✅ Already logged in. Ignoring deep link.");
-      // If we are stuck in LOADING/AUTH but actually logged in, force fetch
-      if (stage !== 'APP') await fetchProfileAndHousehold(session.user);
-      return;
-    }
+  // --- 1. CORE DATA FETCHING ---
+  const loadUserData = async (currentUser: User) => {
+    try {
+      setDebugMsg("Loading Profile...");
+      console.log("👤 Fetching profile for:", currentUser.id);
 
-    // 2. Prevent Double Processing (within same session)
+      let username = currentUser.email?.split('@')[0] || 'user';
+      if (username.length < 3) username = username + '_user';
+
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: currentUser.id,
+          email: currentUser.email,
+          username: username,
+        }, { onConflict: 'id' })
+        .select('*')
+        .single();
+
+      if (profileError) {
+        console.error("❌ Profile Error:", profileError);
+        throw new Error(`Profile Load Failed: ${profileError.message}`);
+      }
+
+      setDebugMsg("Loading Household...");
+
+      let currentHousehold: Household | null = null;
+      const { data: memberData, error: memberError } = await supabase
+        .from("household_members")
+        .select("households(*)")
+        .eq("user_id", currentUser.id)
+        .maybeSingle();
+
+      if (memberError) console.error("❌ Household Member Error:", memberError);
+
+      if (memberData && memberData.households) {
+        currentHousehold = Array.isArray(memberData.households) ? memberData.households[0] as Household : memberData.households as Household;
+      }
+
+      const mergedUser: UserProfile = { ...currentUser, ...profile };
+
+      const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${currentUser.id}`) : null;
+      if (localSeen === 'true') mergedUser.has_seen_tutorial = true;
+
+      setUser(mergedUser);
+      setHousehold(currentHousehold);
+
+      if (currentHousehold) {
+        setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
+      } else {
+        setStage('SETUP_HOUSEHOLD');
+      }
+
+    } catch (err: any) {
+      console.error("💥 CRITICAL LOAD ERROR:", err);
+      setErrorDetails(err.message || "Unknown error loading user data.");
+      setStage('ERROR');
+    }
+  };
+
+  // --- 2. DEEP LINK HANDLER ---
+  const handleDeepLink = async (url: string) => {
     if (processedUrls.current.has(url)) return;
     processedUrls.current.add(url);
 
-    // 3. Force UI to Loading (so user sees progress)
+    console.log("🔗 Deep Link Detected:", url);
     setStage('LOADING');
     setDebugMsg("Processing Login...");
-    console.log("📲 Deep Link Detected:", url);
 
     try {
-      let newData = null;
+      const { data: existing } = await supabase.auth.getSession();
+      if (existing.session?.user) {
+        console.log("✅ Already logged in, skipping exchange.");
+        await loadUserData(existing.session.user);
+        return;
+      }
 
       if (url.includes('code=')) {
         const params = new URLSearchParams(url.split('?')[1]);
@@ -71,8 +124,7 @@ function AuthWrapper() {
         if (code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
-          newData = data;
-          setDebugMsg("Session exchanged...");
+          if (data.user) await loadUserData(data.user);
         }
       }
       else if (url.includes('access_token')) {
@@ -85,163 +137,81 @@ function AuthWrapper() {
         if (access_token && refresh_token) {
           const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
           if (error) throw error;
-          newData = data;
-          setDebugMsg("Session tokens set...");
+          if (data.user) await loadUserData(data.user);
         }
       }
-
-      // 4. Direct Handoff (Don't wait for event listener)
-      if (newData?.user) {
-        setDebugMsg("Fetching Profile...");
-        await fetchProfileAndHousehold(newData.user);
-      }
-
     } catch (e: any) {
-      console.error("Deep link error:", e);
-      if (!e.message?.includes('flow state')) {
-        setErrorDetails(e.message);
-        setStage('ERROR');
-      } else {
-        // If flow state error, likely a duplicate click. Check if we are good.
-        const { data } = await supabase.auth.getUser();
-        if (data.user) await fetchProfileAndHousehold(data.user);
-      }
+      console.error("❌ Deep Link Failed:", e);
+      setErrorDetails(e.message);
+      setStage('ERROR');
     }
   };
 
-  // 💡 1. WEB RESCUE
+  // --- 3. INITIALIZATION EFFECTS ---
+  useEffect(() => {
+    if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
+      listenersInitialized.current = true;
+      App.addListener('appUrlOpen', (data) => handleDeepLink(data.url));
+      App.getLaunchUrl().then((launchData) => {
+        if (launchData?.url) handleDeepLink(launchData.url);
+      });
+    }
+  }, []);
+
   useEffect(() => {
     if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
       const hash = window.location.hash;
       const search = window.location.search;
-      const hasTokens = hash.includes('access_token') || search.includes('code');
-      const isMobileWidth = window.innerWidth < 768;
-
-      if (hasTokens && isMobileWidth) {
+      if ((hash.includes('access_token') || search.includes('code')) && window.innerWidth < 768) {
         window.location.href = `listner://callback${search}${hash}`;
       }
     }
   }, []);
 
-  // 💡 2. NATIVE LISTENERS
   useEffect(() => {
-    if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
-      listenersInitialized.current = true;
-
-      // Live Listener
-      App.addListener('appUrlOpen', (data) => handleUrl(data.url));
-
-      // Cold Start Check
-      const checkLaunchUrl = async () => {
-        const launchData = await App.getLaunchUrl();
-        if (launchData?.url) {
-          console.log("🚀 Cold Start URL found");
-          handleUrl(launchData.url);
-        }
-      };
-      // Check immediately and again shortly after to be safe
-      checkLaunchUrl();
-      setTimeout(checkLaunchUrl, 1000);
-    }
-  }, []);
-
-  // 💡 3. AUTH STATE SYNC
-  useEffect(() => {
-    const initAuth = async () => {
+    let mounted = true;
+    const init = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        await fetchProfileAndHousehold(session.user);
-      } else {
-        setStage('AUTH');
+      if (mounted) {
+        if (session?.user) {
+          await loadUserData(session.user);
+        } else {
+          setStage('AUTH');
+        }
       }
     };
-    initAuth();
+    init();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        // Only fetch if we aren't already (prevent double fetch race condition)
-        if (!user) await fetchProfileAndHousehold(session.user);
+        loadUserData(session.user);
       } else if (event === 'SIGNED_OUT') {
-        window.location.reload(); // Hard reload to clear state
+        window.location.reload();
       }
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const fetchProfileAndHousehold = async (u: User) => {
-    try {
-      // 💡 FIX: Robust Profile Upsert
-      let username = u.email?.split('@')[0] || 'user';
-      if (username.length < 3) username = username + '_user';
-
-      // Try to get existing profile first
-      let { data: profileData } = await supabase.from('profiles').select('has_seen_tutorial, username').eq('id', u.id).single();
-
-      // If not found, creating it
-      if (!profileData) {
-        setDebugMsg("Creating Profile...");
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: u.id,
-            email: u.email,
-            username: username,
-            has_seen_tutorial: false
-          }, { onConflict: 'id' })
-          .select('has_seen_tutorial, username')
-          .single();
-
-        if (createError) throw createError;
-        profileData = newProfile;
+    const timeout = setTimeout(() => {
+      if (stage === 'LOADING') {
+        console.warn("⚠️ App stuck on loading. Resetting...");
+        setStage('AUTH');
       }
+    }, 10000);
 
-      setDebugMsg("Loading Household...");
-      let currentHousehold: Household | null = null;
-      const { data: householdData } = await supabase.from("household_members").select("households(*)").eq("user_id", u.id).maybeSingle();
-
-      if (householdData && householdData.households) {
-        currentHousehold = Array.isArray(householdData.households) ? householdData.households[0] as Household : householdData.households as Household;
-      }
-
-      const mergedUser: UserProfile = { ...u, ...profileData! };
-      const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${u.id}`) : null;
-      if (localSeen === 'true') mergedUser.has_seen_tutorial = true;
-
-      setUser(mergedUser);
-      setHousehold(currentHousehold);
-
-      // Transition to App
-      if (currentHousehold) {
-        setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
-      } else {
-        setStage('SETUP_HOUSEHOLD');
-      }
-
-    } catch (err: any) {
-      console.error("Critical Data Load Error:", err);
-      setErrorDetails(err.message || "Unknown error loading data");
-      setStage('ERROR');
-    }
-  }
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+      clearTimeout(timeout);
+    };
+  }, [stage]);
 
   const handleTutorialComplete = async () => {
     if (!user) return;
-    const updatedUser = { ...user, has_seen_tutorial: true };
-    setUser(updatedUser);
+    setUser({ ...user, has_seen_tutorial: true });
     localStorage.setItem(`tutorial_seen_${user.id}`, "true");
-    if (household) setStage('APP');
-    else setStage('SETUP_HOUSEHOLD');
+    setStage(household ? 'APP' : 'SETUP_HOUSEHOLD');
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
-  }
+  };
 
-  const handleHouseholdCreated = (u: User) => {
-    fetchProfileAndHousehold(u);
-  }
-
-  // 💡 Safe Area CSS (Fixes button tucked to bottom)
-  // pt-safe-top adds padding for notch/status bar
-  // pb-safe-bottom adds padding for home swipe indicator
   const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
 
   switch (stage) {
@@ -255,24 +225,20 @@ function AuthWrapper() {
     case 'ERROR': return (
       <div className={`flex flex-col items-center justify-center bg-slate-50 p-6 text-center ${safeAreaWrapper}`}>
         <div className="bg-rose-100 p-4 rounded-full mb-4"><AlertTriangle className="w-8 h-8 text-rose-600" /></div>
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Unable to Load</h2>
-        <p className="text-sm text-slate-500 mb-6">We ran into an issue loading your data.</p>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Login Issue</h2>
+        <p className="text-sm text-slate-500 mb-6">We couldn't load your profile.</p>
         <div className="bg-slate-100 p-3 rounded-lg text-xs font-mono text-slate-600 mb-6 max-w-full break-all border border-slate-200">{errorDetails}</div>
         <div className="flex gap-3 w-full max-w-xs">
           <Button onClick={() => window.location.reload()} className="flex-1 bg-slate-900 text-white">Retry</Button>
-          <Button variant="outline" onClick={() => { supabase.auth.signOut(); window.location.reload(); }} className="flex-1 text-rose-600 border-rose-200 hover:bg-rose-50"><LogOut className="w-4 h-4 mr-2" /> Log Out</Button>
+          <Button variant="outline" onClick={() => { supabase.auth.signOut(); window.location.reload(); }} className="flex-1 text-rose-600 border-rose-200 hover:bg-rose-50"><LogOut className="w-4 h-4 mr-2" /> Reset</Button>
         </div>
       </div>
     );
     case 'WELCOME': return <OnboardingScreen onStart={() => setStage('AUTH')} />;
     case 'AUTH': return <div className={safeAreaWrapper}><AuthPage /></div>;
     case 'TUTORIAL': return <div className={safeAreaWrapper}><Tutorial onComplete={handleTutorialComplete} /></div>;
-    case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={handleHouseholdCreated} /></div>;
-    case 'APP': return (
-      <div className={safeAreaWrapper}>
-        <Dashboard user={user!} household={household!} />
-      </div>
-    );
+    case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => loadUserData(u)} /></div>;
+    case 'APP': return <div className={safeAreaWrapper}><Dashboard user={user!} household={household!} /></div>;
     default: return null;
   }
 }
@@ -316,10 +282,7 @@ function AuthPage() {
   }, []);
 
   const getRedirectUrl = () => {
-    const isNative = Capacitor.isNativePlatform();
-    if (isNative) {
-      return 'https://listner.vercel.app/auth/redirect';
-    }
+    if (Capacitor.isNativePlatform()) return 'https://listner.vercel.app/auth/redirect';
     return typeof window !== 'undefined' ? window.location.origin : '';
   };
 
@@ -335,10 +298,9 @@ function AuthPage() {
           const { error } = await supabase.auth.signInWithPassword({ email, password });
           if (error) throw error;
         } else {
-          const redirectTo = getRedirectUrl();
           const { error } = await supabase.auth.signInWithOtp({
             email,
-            options: { emailRedirectTo: redirectTo }
+            options: { emailRedirectTo: getRedirectUrl() }
           });
           if (error) throw error;
           setSuccessMsg("Magic link sent! Check email.");
@@ -347,38 +309,21 @@ function AuthPage() {
     } catch (err: any) { setError(err.message); } finally { setLoading(false); }
   }
 
-  const handleResetPassword = async () => {
-    setLoading(true); setError(null); setSuccessMsg(null);
-    const redirectTo = getRedirectUrl();
-    try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${redirectTo}/reset-password`
-      });
-      if (error) throw error;
-      setSuccessMsg("Reset link sent to your email.");
-    } catch (err: any) { setError(err.message); } finally { setLoading(false); }
-  }
-
   const handleGoogleLogin = async () => {
     setLoading(true);
-    const redirectTo = getRedirectUrl();
-
     try {
       await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectTo,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          }
+          redirectTo: getRedirectUrl(),
+          queryParams: { access_type: 'offline', prompt: 'consent' }
         }
       });
     } catch (error) {
       console.error("Google sign in error:", error);
       setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="relative flex-1 flex overflow-hidden bg-slate-50">
