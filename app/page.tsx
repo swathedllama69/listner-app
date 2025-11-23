@@ -8,13 +8,17 @@ import { OnboardingScreen } from '@/components/app/OnboardingScreen';
 import { Tutorial } from '@/components/app/Tutorial';
 import { CreateHouseholdForm } from '@/components/app/CreateHouseholdForm';
 import { Household } from '@/lib/types';
-import { Loader2, ShieldCheck, Users, Mail, Lock, Wand2, ArrowLeft, CheckCircle2, ArrowRight, ListChecks, ShoppingCart, Wallet } from "lucide-react";
+import {
+  Loader2, ShieldCheck, Users, Mail, Lock, Wand2, ArrowLeft,
+  CheckCircle2, ArrowRight, ListChecks, ShoppingCart, Wallet, AlertTriangle, RefreshCw, LogOut
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { App } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 
 /* eslint-disable @next/next/no-img-element */
 
@@ -23,15 +27,6 @@ type UserProfile = User & {
   username?: string;
 };
 
-declare global {
-  interface Window {
-    Capacitor?: {
-      isNative: boolean;
-      platform: string;
-    };
-  }
-}
-
 export default function Home() {
   return <AuthWrapper />;
 }
@@ -39,107 +34,105 @@ export default function Home() {
 // --- AUTH WRAPPER ---
 function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
-  const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP'>('LOADING');
+  const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP' | 'ERROR'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
-  const [debugMsg, setDebugMsg] = useState("");
+  const [debugMsg, setDebugMsg] = useState("Initializing...");
+  const [errorDetails, setErrorDetails] = useState("");
 
-  // Prevent duplicate listeners in React Strict Mode
   const listenersInitialized = useRef(false);
+  const processedUrls = useRef<Set<string>>(new Set());
 
-  // 💡 1. RESCUE LOGIC (Web Fallback)
+  // --- HELPER: PROCESS URL ---
+  const handleUrl = async (url: string) => {
+    if (processedUrls.current.has(url)) return;
+    processedUrls.current.add(url);
+
+    console.log("📲 Deep Link Detected:", url);
+    setDebugMsg("Processing Login...");
+
+    try {
+      if (url.includes('code=')) {
+        const params = new URLSearchParams(url.split('?')[1]);
+        const code = params.get('code');
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+          setDebugMsg("Session exchanged...");
+        }
+      }
+      else if (url.includes('access_token')) {
+        const hashIndex = url.indexOf('#');
+        const hash = url.substring(hashIndex + 1);
+        const params = new URLSearchParams(hash);
+        const access_token = params.get('access_token');
+        const refresh_token = params.get('refresh_token');
+
+        if (access_token && refresh_token) {
+          const { error } = await supabase.auth.setSession({ access_token, refresh_token });
+          if (error) throw error;
+          setDebugMsg("Session tokens set...");
+        }
+      }
+    } catch (e: any) {
+      console.error("Deep link error:", e);
+      if (!e.message?.includes('flow state')) {
+        setErrorDetails(e.message);
+        setStage('ERROR');
+      } else {
+        // Recover from "flow state" error by checking if we are actually logged in
+        const { data } = await supabase.auth.getUser();
+        if (data.user) fetchProfileAndHousehold(data.user);
+      }
+    }
+  };
+
+  // 💡 1. WEB RESCUE
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
       const hash = window.location.hash;
       const search = window.location.search;
       const hasTokens = hash.includes('access_token') || search.includes('code');
-      const isNative = window.Capacitor?.isNative;
       const isMobileWidth = window.innerWidth < 768;
 
-      if (hasTokens && !isNative && isMobileWidth) {
-        console.log("⚠️ Stuck on Web with tokens! Rescuing to App...");
+      if (hasTokens && isMobileWidth) {
         window.location.href = `listner://callback${search}${hash}`;
       }
     }
   }, []);
 
-  // 💡 2. NATIVE LISTENER (The Fix)
+  // 💡 2. NATIVE LISTENERS
   useEffect(() => {
-    if (typeof window !== 'undefined' && window.Capacitor?.isNative && !listenersInitialized.current) {
+    if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
       listenersInitialized.current = true;
-
-      const handleUrl = async (url: string) => {
-        console.log("📲 Deep Link Detected:", url);
-        setDebugMsg("Processing login...");
-
-        try {
-          // PKCE Flow
-          if (url.includes('code=')) {
-            const params = new URLSearchParams(url.split('?')[1]);
-            const code = params.get('code');
-            if (code) {
-              const { error } = await supabase.auth.exchangeCodeForSession(code);
-              if (error) throw error;
-              setDebugMsg("Session exchanged!");
-            }
-          }
-          // Implicit Flow
-          else if (url.includes('access_token')) {
-            const hashIndex = url.indexOf('#');
-            const hash = url.substring(hashIndex + 1);
-            const params = new URLSearchParams(hash);
-            const access_token = params.get('access_token');
-            const refresh_token = params.get('refresh_token');
-
-            if (access_token && refresh_token) {
-              await supabase.auth.setSession({ access_token, refresh_token });
-            }
-          }
-        } catch (e: any) {
-          console.error("Deep link error:", e);
-          alert(`Login Error: ${e.message || "Unknown error"}`);
-          setStage('AUTH'); // Reset UI so user isn't stuck
-        }
-      };
-
-      // A. Listen for new URLs (Warm Start)
       App.addListener('appUrlOpen', (data) => handleUrl(data.url));
 
-      // B. Check for "Missed" URLs (Cold Start)
-      // We try multiple times to ensure the native bridge is ready
-      const checkLaunch = async () => {
+      const checkLaunchUrl = async () => {
         const launchData = await App.getLaunchUrl();
-        if (launchData && launchData.url) {
-          console.log("🚀 Recovered Cold Start URL:", launchData.url);
-          handleUrl(launchData.url);
-        }
+        if (launchData?.url) handleUrl(launchData.url);
       };
-      checkLaunch();
-      setTimeout(checkLaunch, 500);
-      setTimeout(checkLaunch, 1500);
+      checkLaunchUrl();
+      setTimeout(checkLaunchUrl, 1000);
     }
   }, []);
 
-  // 💡 3. DATA SYNC
+  // 💡 3. AUTH STATE SYNC
   useEffect(() => {
-    const fetchSession = async () => {
-      const { data: { user: currentUser } } = await supabase.auth.getUser();
-      if (currentUser) {
-        await fetchProfileAndHousehold(currentUser);
+    const initAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        await fetchProfileAndHousehold(session.user);
       } else {
         setStage('AUTH');
       }
     };
-    fetchSession();
+    initAuth();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user) {
-        if (!user || event === 'SIGNED_IN') {
-          await fetchProfileAndHousehold(session.user);
-        }
-      } else {
-        setUser(null);
-        setHousehold(null);
-        setStage('AUTH');
+      if (event === 'SIGNED_IN' && session?.user) {
+        await fetchProfileAndHousehold(session.user);
+      } else if (event === 'SIGNED_OUT') {
+        // 💡 HARD RELOAD ON LOGOUT to clear all states
+        window.location.reload();
       }
     });
 
@@ -147,46 +140,62 @@ function AuthWrapper() {
   }, []);
 
   const fetchProfileAndHousehold = async (u: User) => {
-    let profileData: { has_seen_tutorial: boolean, username?: string } | null = null;
-    let { data: profileRow, error: profileError } = await supabase.from('profiles').select('has_seen_tutorial, username').eq('id', u.id).single();
+    try {
+      setDebugMsg("Loading Profile...");
 
-    if (profileRow) {
-      profileData = profileRow;
-    } else if (profileError && profileError.code === 'PGRST116') {
-      const { data: newProfileData } = await supabase.from('profiles').insert({ id: u.id, has_seen_tutorial: false, username: u.email?.split('@')[0] || u.id }).select('has_seen_tutorial, username').single();
-      profileData = newProfileData;
-    }
+      // 1. Get or Create Profile (Using UPSERT to avoid "duplicate key" errors)
+      let username = u.email?.split('@')[0] || 'user';
+      if (username.length < 3) username = username + '_user'; // Fix short username issue
 
-    // 💡 CRITICAL TUTORIAL FIX: Check Local Storage Override
-    const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${u.id}`) : null;
-    if (localSeen === 'true' && profileData) {
-      profileData.has_seen_tutorial = true;
-      supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', u.id).then();
-    }
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .upsert({
+          id: u.id,
+          email: u.email,
+          username: username,
+          // Only set 'has_seen_tutorial' if it doesn't exist, otherwise keep current
+        }, { onConflict: 'id', ignoreDuplicates: false })
+        .select('has_seen_tutorial, username')
+        .single();
 
-    let currentHousehold: Household | null = null;
-    const { data: householdData } = await supabase.from("household_members").select("households(*)").eq("user_id", u.id).maybeSingle();
-
-    if (householdData && householdData.households) {
-      currentHousehold = Array.isArray(householdData.households) ? householdData.households[0] as Household : householdData.households as Household;
-    }
-
-    const mergedUser: UserProfile = { ...u, ...profileData! };
-    setUser(mergedUser);
-    setHousehold(currentHousehold);
-
-    if (currentHousehold) {
-      if (mergedUser.has_seen_tutorial) {
-        setStage('APP');
-      } else {
-        setStage('TUTORIAL');
+      // If upsert fails (rare), try to just select
+      let finalProfile = profileData;
+      if (!finalProfile) {
+        const { data: existing } = await supabase.from('profiles').select('has_seen_tutorial, username').eq('id', u.id).single();
+        finalProfile = existing;
       }
-    } else {
-      if (mergedUser.has_seen_tutorial) {
+
+      // If still no profile, we have a problem
+      if (!finalProfile) {
+        // Fallback object so app doesn't crash
+        finalProfile = { has_seen_tutorial: false, username: username };
+      }
+
+      setDebugMsg("Loading Household...");
+      let currentHousehold: Household | null = null;
+      const { data: householdData } = await supabase.from("household_members").select("households(*)").eq("user_id", u.id).maybeSingle();
+
+      if (householdData && householdData.households) {
+        currentHousehold = Array.isArray(householdData.households) ? householdData.households[0] as Household : householdData.households as Household;
+      }
+
+      const mergedUser: UserProfile = { ...u, ...finalProfile };
+      const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${u.id}`) : null;
+      if (localSeen === 'true') mergedUser.has_seen_tutorial = true;
+
+      setUser(mergedUser);
+      setHousehold(currentHousehold);
+
+      if (currentHousehold) {
+        setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
+      } else {
         setStage('SETUP_HOUSEHOLD');
-      } else {
-        setStage('TUTORIAL');
       }
+
+    } catch (err: any) {
+      console.error("Critical Data Load Error:", err);
+      setErrorDetails(err.message || "Unknown error loading data");
+      setStage('ERROR');
     }
   }
 
@@ -200,17 +209,38 @@ function AuthWrapper() {
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   }
 
-  const handleHouseholdCreated = (u: User) => {
-    fetchProfileAndHousehold(u);
-  }
+  // 💡 Safe Area Wrapper Style
+  const safeAreaClass = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]";
 
   switch (stage) {
-    case 'LOADING': return <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white"><Loader2 className="w-10 h-10 animate-spin text-emerald-400 mb-4" /><p className="text-xs text-slate-500">{debugMsg}</p></div>;
+    case 'LOADING': return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-6 text-center">
+        <Loader2 className="w-12 h-12 animate-spin text-emerald-400 mb-6" />
+        <h2 className="text-lg font-semibold text-white mb-2">Loading...</h2>
+        <p className="text-xs text-slate-400 font-mono bg-slate-800 px-3 py-2 rounded-lg border border-slate-700">{debugMsg}</p>
+      </div>
+    );
+    case 'ERROR': return (
+      <div className={`flex flex-col items-center justify-center min-h-screen bg-slate-50 p-6 text-center ${safeAreaClass}`}>
+        <div className="bg-rose-100 p-4 rounded-full mb-4"><AlertTriangle className="w-8 h-8 text-rose-600" /></div>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Unable to Load</h2>
+        <p className="text-sm text-slate-500 mb-6">We ran into an issue loading your data.</p>
+        <div className="bg-slate-100 p-3 rounded-lg text-xs font-mono text-slate-600 mb-6 max-w-full break-all border border-slate-200">{errorDetails}</div>
+        <div className="flex gap-3 w-full max-w-xs">
+          <Button onClick={() => window.location.reload()} className="flex-1 bg-slate-900 text-white">Retry</Button>
+          <Button variant="outline" onClick={() => { supabase.auth.signOut(); window.location.reload(); }} className="flex-1 text-rose-600 border-rose-200 hover:bg-rose-50"><LogOut className="w-4 h-4 mr-2" /> Log Out</Button>
+        </div>
+      </div>
+    );
     case 'WELCOME': return <OnboardingScreen onStart={() => setStage('AUTH')} />;
-    case 'AUTH': return <AuthPage />;
-    case 'TUTORIAL': return <Tutorial onComplete={handleTutorialComplete} />;
-    case 'SETUP_HOUSEHOLD': return <CreateHouseholdForm user={user!} onHouseholdCreated={handleHouseholdCreated} />;
-    case 'APP': return <Dashboard user={user!} household={household!} />;
+    case 'AUTH': return <div className={safeAreaClass}><AuthPage /></div>;
+    case 'TUTORIAL': return <div className={safeAreaClass}><Tutorial onComplete={handleTutorialComplete} /></div>;
+    case 'SETUP_HOUSEHOLD': return <div className={safeAreaClass}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => fetchProfileAndHousehold(u)} /></div>;
+    case 'APP': return (
+      <div className={`h-screen flex flex-col ${safeAreaClass}`}>
+        <Dashboard user={user!} household={household!} />
+      </div>
+    );
     default: return null;
   }
 }
@@ -254,7 +284,8 @@ function AuthPage() {
   }, []);
 
   const getRedirectUrl = () => {
-    const isNative = typeof window !== 'undefined' && window.Capacitor?.isNative;
+    // 💡 Fix for 'Capacitor' undefined error
+    const isNative = Capacitor.isNativePlatform();
     if (isNative) {
       return 'https://listner.vercel.app/auth/redirect';
     }
@@ -305,7 +336,11 @@ function AuthPage() {
       await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: redirectTo
+          redirectTo: redirectTo,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          }
         }
       });
     } catch (error) {
@@ -316,7 +351,6 @@ function AuthPage() {
 
   return (
     <div className="relative min-h-screen w-full flex overflow-hidden bg-slate-50">
-      {/* ... (Styles kept same) ... */}
       <style jsx global>{`
         @keyframes blob { 0%, 100% { transform: translate(0, 0) scale(1); } 25% { transform: translate(-200px, 150px) scale(1.1); } 50% { transform: translate(250px, -150px) scale(0.9); } 75% { transform: translate(-150px, -100px) scale(1.2); } }
         .animation-delay-2000 { animation-delay: 2s; }
@@ -358,7 +392,6 @@ function AuthPage() {
         {/* Left Side */}
         <div className="hidden lg:flex w-1/2 h-screen flex-col justify-between p-16 text-slate-800 bg-slate-100/50">
           <div className="flex items-center gap-4">
-            {/* Logo Size increased to w-32 h-32 */}
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-32 h-32 object-contain" />
             <span className="text-4xl font-bold tracking-tight">ListNer.</span>
           </div>
