@@ -286,6 +286,19 @@ function AuthPage() {
     return typeof window !== 'undefined' ? window.location.origin : '';
   };
 
+  // 💡 Added missing function
+  const handleResetPassword = async () => {
+    setLoading(true); setError(null); setSuccessMsg(null);
+    const redirectTo = getRedirectUrl();
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${redirectTo}/reset-password`
+      });
+      if (error) throw error;
+      setSuccessMsg("Reset link sent to your email.");
+    } catch (err: any) { setError(err.message); } finally { setLoading(false); }
+  };
+
   const handleAuth = async (mode: 'signin' | 'signup') => {
     setLoading(true); setError(null); setSuccessMsg(null);
     try {
@@ -365,7 +378,6 @@ function AuthPage() {
       </div>
 
       <div className="relative z-10 w-full flex flex-col lg:flex-row">
-        {/* Left Side */}
         <div className="hidden lg:flex w-1/2 h-screen flex-col justify-between p-16 text-slate-800 bg-slate-100/50">
           <div className="flex items-center gap-4">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-32 h-32 object-contain" />
@@ -386,7 +398,6 @@ function AuthPage() {
           <div className="text-xs text-slate-400">© 2025 ListNer Inc.</div>
         </div>
 
-        {/* Right Side */}
         <div className="w-full lg:w-1/2 h-full flex flex-col items-center justify-center p-6">
           <div className="lg:hidden mb-8 flex flex-col items-center">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-16 h-16 mb-4 object-contain" />
@@ -407,7 +418,7 @@ function AuthPage() {
                   <div className="space-y-2"><Label>Email Address</Label><Input type="email" placeholder="you@example.com" className="h-12" value={email} onChange={e => setEmail(e.target.value)} /></div>
                   {successMsg && <div className="text-sm text-emerald-600 bg-emerald-50 p-3 rounded-lg flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> {successMsg}</div>}
                   {error && <div className="text-sm text-rose-600 bg-rose-50 p-3 rounded-lg">{error}</div>}
-                  <Button onClick={handleResetPassword} disabled={loading} className="w-full h-12 bg-teal-600 text-white">{loading ? "Sending..." : "Send Reset Link"}</Button>
+                  <Button onClick={() => handleResetPassword()} disabled={loading} className="w-full h-12 bg-teal-600 text-white">{loading ? "Sending..." : "Send Reset Link"}</Button>
                   <Button variant="ghost" onClick={() => setAuthMethod('password')} className="w-full h-12"><ArrowLeft className="w-4 h-4 mr-2" /> Back to Sign In</Button>
                 </div>
               ) : (
