@@ -21,19 +21,12 @@ import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Share2, Settings, C
 const categories = ["Item", "Project", "Vacation", "Other"]
 const priorities = ["High", "Medium", "Low"]
 
+// --- HELPER FUNCTIONS ---
 const getPriorityCardStyle = (p: string) => {
     switch (p) {
         case 'High': return 'bg-rose-50 border-rose-200';
         case 'Medium': return 'bg-amber-50/50 border-amber-100';
         default: return 'bg-white border-slate-100';
-    }
-}
-
-const getPriorityBadgeStyle = (p: string) => {
-    switch (p) {
-        case 'High': return 'text-rose-700 bg-white border-rose-200 font-bold';
-        case 'Medium': return 'text-amber-700 bg-white border-amber-200';
-        default: return 'text-slate-500 bg-slate-50 border-slate-200';
     }
 }
 
@@ -71,6 +64,8 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [items, setItems] = useState<WishlistItem[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [activeTab, setActiveTab] = useState("All")
+
+    // Pagination State
     const [page, setPage] = useState(1);
     const ITEMS_PER_PAGE = 5;
 
@@ -121,8 +116,9 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const handleRenameList = async () => {
         const { error } = await supabase.from('lists').update({ name: listNameForm }).eq('id', list.id);
         if (!error) {
-            setListSettings({ ...listSettings, name: listNameForm }); // Local Update
+            setListSettings(prev => ({ ...prev, name: listNameForm }));
             setIsRenameOpen(false);
+            // No reload here to prevent app refresh
         }
     }
 
@@ -177,9 +173,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             await supabase.from("wishlist_items").delete().eq("id", deleteConfirm.id);
             setItems(items.filter(item => item.id !== deleteConfirm.id));
         } else if (deleteConfirm.type === 'list') {
-            await supabase.from('lists').delete().eq('id', list.id);
-            // For List Delete, we reload to go back to dashboard cleanly as the parent component holds the list
-            window.location.reload();
+            await supabase.from('lists').delete().eq('id', list.id); window.location.reload();
         }
         setDeleteConfirm(null);
     }
@@ -193,7 +187,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         <div className="space-y-6 pb-24">
             <div className="flex items-center justify-between">
                 <div>
-                    <h2 className="text-2xl font-bold text-slate-800">{listSettings.name}</h2>
+                    <h2 className="text-2xl font-bold text-slate-800">{list.name}</h2>
                     <div className="flex gap-2 mt-1">{listSettings.isPrivate ? <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100"><Lock className="w-3 h-3" /> Private</span> : <span className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100"><Globe className="w-3 h-3" /> Shared</span>}</div>
                 </div>
                 <DropdownMenu>

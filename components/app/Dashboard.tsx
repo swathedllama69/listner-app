@@ -24,7 +24,6 @@ import { ShoppingList } from "@/components/app/ShoppingList"
 import { Finance } from "@/components/app/Finance"
 import { HomeOverview } from "@/components/app/HomeOverview"
 import { OnboardingWizard } from "@/components/app/OnboardingWizard"
-import { Tutorial } from "@/components/app/Tutorial"
 import { HouseholdSyncDialog } from "@/components/app/HouseholdSyncDialog"
 import { SettingsView } from "@/components/app/SettingsView"
 import { NotificationBell } from "@/components/app/NotificationBell"
@@ -63,6 +62,8 @@ function ContextualCreateDialog({ isOpen, onOpenChange, context, user, household
     isOpen: boolean, onOpenChange: (open: boolean) => void, context: string, user: User, household: Household, onSuccess: () => void, currencySymbol: string
 }) {
     const [loading, setLoading] = useState(false);
+
+    // Determine default tab based on context (activeTab from Dashboard)
     let defaultTab = "expense";
     if (context === "shopping") defaultTab = "shopping";
     if (context === "wishlist") defaultTab = "wishlist";
@@ -239,7 +240,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const [isFabOpen, setIsFabOpen] = useState(false);
     const [isListDetailActive, setIsListDetailActive] = useState(false);
     const [showOnboarding, setShowOnboarding] = useState(false);
-    const [showTutorial, setShowTutorial] = useState(false);
     const [isSyncOpen, setIsSyncOpen] = useState(false);
 
     // --- NEW STATE FOR REFRESHING ---
@@ -261,9 +261,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
         if (!user.user_metadata?.onboarding_complete) {
             setShowOnboarding(true);
-        } else {
-            const seenTutorial = localStorage.getItem(`tutorial_seen_${user.id}`);
-            if (!seenTutorial) setShowTutorial(true);
         }
     }, [household.id, user]);
 
@@ -289,7 +286,10 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         // Fix: Mark tutorial as seen so it doesn't pop up right after onboarding
         localStorage.setItem(`tutorial_seen_${user.id}`, "true");
         setShowOnboarding(false);
-        window.location.reload();
+        // Safe window reload to refresh data
+        if (typeof window !== "undefined") {
+            window.location.reload();
+        }
     }
 
     return (
@@ -367,7 +367,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                 )}
 
                 {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={handleOnboardingComplete} />}
-                {showTutorial && !showOnboarding && <Tutorial onComplete={() => setShowTutorial(false)} />}
+
                 <ContextualCreateDialog isOpen={isFabOpen} onOpenChange={setIsFabOpen} context={activeTab} user={user} household={household} onSuccess={handleGlobalRefresh} currencySymbol={currencySymbol} />
 
                 <HouseholdSyncDialog
