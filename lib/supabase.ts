@@ -1,3 +1,4 @@
+// lib/supabase.ts content:
 import { createClient } from '@supabase/supabase-js'
 
 // 🔐 CREDENTIALS
@@ -9,7 +10,8 @@ export const supabase = createClient(supabaseUrl, supabaseKey, {
         // 💾 CRITICAL: Save session to disk so it survives app restarts/OS killing
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: false,
+        // 💡 FIX: This MUST be true for PWA/Web OAuth to work correctly.
+        detectSessionInUrl: true,
         storage: typeof window !== 'undefined' ? window.localStorage : undefined,
     },
 })
