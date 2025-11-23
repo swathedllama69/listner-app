@@ -158,15 +158,8 @@ function AuthWrapper() {
     }
   }, []);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
-      const hash = window.location.hash;
-      const search = window.location.search;
-      if ((hash.includes('access_token') || search.includes('code')) && window.innerWidth < 768) {
-        window.location.href = `listner://callback${search}${hash}`;
-      }
-    }
-  }, []);
+  // 💡 REMOVED WEB RESCUE: This was killing the PWA login.
+  // We only rely on Supabase standard auth state for web now.
 
   useEffect(() => {
     let mounted = true;
@@ -256,24 +249,25 @@ function AuthPage() {
 
   const features = [
     { title: "The Best List App", desc: "Say goodbye to old spreadsheets. ListNer is the new command center for your household.", icon: ListChecks, color: "bg-teal-600" },
-    { title: "Sync Your Home", desc: "Coordinate all lists, tasks, and goals in real-time with family or partners.", icon: Users, color: "bg-teal-500" },
+    { title: "Sync Your Home", desc: "Coordinate all lists, tasks, and goals in real-time with buddy or partners.", icon: Users, color: "bg-teal-500" },
     { title: "One-Stop Finance", desc: "Easily track shared expenses and automate IOU calculations instantly.", icon: Wallet, color: "bg-emerald-500" },
     { title: "Fully Secured", desc: "Your financial and household data is protected with enterprise-grade encryption.", icon: ShieldCheck, color: "bg-indigo-500" },
   ];
 
+  // 💡 UPDATED ANIMATIONS: Varied Opacity
   const animationItems = [
-    { type: '🍎', size: 10, duration: 18, delay: 0, top: '10%', left: '10%', animKey: 'slowDrift1', isEmoji: true },
-    { type: '💵', size: 14, duration: 18, delay: 10, bottom: '10%', left: '40%', animKey: 'slowDrift3', isEmoji: true },
-    { type: '🛒', size: 11, duration: 15, delay: 15, top: '20%', right: '30%', animKey: 'slowDrift4', isEmoji: true },
-    { type: '🥦', size: 12, duration: 23, delay: 5, top: '50%', right: '5%', animKey: 'slowDrift2', isEmoji: true },
-    { type: '🍐', size: 9, duration: 22, delay: 45, top: '5%', left: '25%', animKey: 'slowDrift10', isEmoji: true },
-    { type: '🍌', size: 15, duration: 17, delay: 50, bottom: '20%', right: '50%', animKey: 'slowDrift11', isEmoji: true },
-    { type: '🍇', size: 13, duration: 14, delay: 55, top: '75%', right: '25%', animKey: 'slowDrift12', isEmoji: true },
-    { type: '🪑', size: 10, duration: 16, delay: 60, top: '60%', left: '5%', animKey: 'slowDrift13', isEmoji: true },
-    { type: '🖊️', size: 9, duration: 20, delay: 65, bottom: '40%', left: '15%', animKey: 'slowDrift14', isEmoji: true },
-    { type: '💻', size: 16, duration: 19, delay: 70, top: '30%', right: '10%', animKey: 'slowDrift15', isEmoji: true },
-    { Icon: ShoppingCart, color: 'text-lime-400', size: 10, duration: 20, delay: 20, bottom: '25%', right: '15%', animKey: 'slowDrift5', isEmoji: false },
-    { Icon: Wallet, color: 'text-teal-400', size: 12, duration: 18, delay: 25, top: '70%', left: '20%', animKey: 'slowDrift6', isEmoji: false },
+    { type: '🍎', size: 10, duration: 18, delay: 0, top: '10%', left: '10%', animKey: 'slowDrift1', isEmoji: true, opacity: 0.25 },
+    { type: '💵', size: 14, duration: 18, delay: 10, bottom: '10%', left: '40%', animKey: 'slowDrift3', isEmoji: true, opacity: 0.15 },
+    { type: '🛒', size: 11, duration: 15, delay: 15, top: '20%', right: '30%', animKey: 'slowDrift4', isEmoji: true, opacity: 0.2 },
+    { type: '🥦', size: 12, duration: 23, delay: 5, top: '50%', right: '5%', animKey: 'slowDrift2', isEmoji: true, opacity: 0.15 },
+    { type: '🍐', size: 9, duration: 22, delay: 45, top: '5%', left: '25%', animKey: 'slowDrift10', isEmoji: true, opacity: 0.25 },
+    { type: '🍌', size: 15, duration: 17, delay: 50, bottom: '20%', right: '50%', animKey: 'slowDrift11', isEmoji: true, opacity: 0.2 },
+    { type: '🍇', size: 13, duration: 14, delay: 55, top: '75%', right: '25%', animKey: 'slowDrift12', isEmoji: true, opacity: 0.15 },
+    { type: '🪑', size: 10, duration: 16, delay: 60, top: '60%', left: '5%', animKey: 'slowDrift13', isEmoji: true, opacity: 0.2 },
+    { type: '🖊️', size: 9, duration: 20, delay: 65, bottom: '40%', left: '15%', animKey: 'slowDrift14', isEmoji: true, opacity: 0.25 },
+    { type: '💻', size: 16, duration: 19, delay: 70, top: '30%', right: '10%', animKey: 'slowDrift15', isEmoji: true, opacity: 0.15 },
+    { Icon: ShoppingCart, color: 'text-lime-400', size: 10, duration: 20, delay: 20, bottom: '25%', right: '15%', animKey: 'slowDrift5', isEmoji: false, opacity: 0.2 },
+    { Icon: Wallet, color: 'text-teal-400', size: 12, duration: 18, delay: 25, top: '70%', left: '20%', animKey: 'slowDrift6', isEmoji: false, opacity: 0.25 },
   ];
 
   useEffect(() => {
@@ -286,7 +280,6 @@ function AuthPage() {
     return typeof window !== 'undefined' ? window.location.origin : '';
   };
 
-  // 💡 Added missing function
   const handleResetPassword = async () => {
     setLoading(true); setError(null); setSuccessMsg(null);
     const redirectTo = getRedirectUrl();
@@ -370,7 +363,7 @@ function AuthPage() {
           const sizeInPixels = item.size * (item.isEmoji ? 6 : 4.5);
           const IconComponent = item.Icon;
           return (
-            <div key={index} className={`absolute pointer-events-none ${item.color || ''} opacity-[0.2]`} style={{ ...item, width: `${sizeInPixels}px`, height: `${sizeInPixels}px`, animation: `${item.animKey} ${item.duration}s ease-in-out ${item.delay}s infinite alternate` }}>
+            <div key={index} className={`absolute pointer-events-none ${item.color || ''}`} style={{ ...item, width: `${sizeInPixels}px`, height: `${sizeInPixels}px`, animation: `${item.animKey} ${item.duration}s ease-in-out ${item.delay}s infinite alternate`, opacity: item.opacity }}>
               {item.isEmoji ? <span className="text-5xl drop-shadow-md" style={{ fontSize: `${sizeInPixels}px` }}>{item.type}</span> : IconComponent && <IconComponent className="w-full h-full" />}
             </div>
           );
@@ -409,7 +402,7 @@ function AuthPage() {
                 {authMethod === 'forgot_password' ? "Reset Password" : activeTab === 'signup' ? "Let's Get Started!" : "Welcome Back"}
               </CardTitle>
               <CardDescription>
-                {authMethod === 'forgot_password' ? "Enter your email to recover access." : activeTab === 'signup' ? "Create your account and sync up your home life." : "Sign in to access your shared space"}
+                {authMethod === 'forgot_password' ? "Enter your email to recover access." : activeTab === 'signup' ? "Create your ListNer account" : "Sign in to access your ListNer"}
               </CardDescription>
             </CardHeader>
             <CardContent className="px-8 pb-8">

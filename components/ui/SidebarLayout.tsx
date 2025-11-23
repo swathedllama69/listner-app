@@ -114,10 +114,10 @@ export function SidebarLayout({ children, user, household, memberCount, activeTa
             </aside>
 
             {/* --- 2. MAIN CONTENT --- */}
-            <main className="flex-1 w-full min-w-0 pb-24 md:pb-8 relative z-10">
+            <main className="flex-1 w-full min-w-0 pb-24 md:pb-8 relative z-10 pt-16 md:pt-0"> {/* Added pt-16 for fixed header */}
 
-                {/* Mobile Header - Glass - Sticky Top */}
-                <header className="md:hidden sticky top-0 z-50 bg-white/70 backdrop-blur-xl border-b border-white/40 px-4 py-3 flex justify-between items-center shadow-sm">
+                {/* Mobile Header - Fixed */}
+                <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white/70 backdrop-blur-xl border-b border-white/40 px-4 py-3 flex justify-between items-center shadow-sm pt-[env(safe-area-inset-top)]">
                     <div
                         className="flex items-center gap-2.5 cursor-pointer active:opacity-70 transition-opacity"
                         onClick={() => setActiveTab('home')}
@@ -141,15 +141,16 @@ export function SidebarLayout({ children, user, household, memberCount, activeTa
                 </div>
             </main>
 
-            {/* --- 3. MOBILE NAV - Glass --- */}
-            <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-white/40 pb-safe z-40 shadow-[0_-4px_30px_-5px_rgba(0,0,0,0.1)]">
-                <div className="flex justify-around items-center h-16 px-2">
+            {/* --- 3. MOBILE NAV - UPDATED --- */}
+            <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-white/40 z-40 shadow-[0_-4px_30px_-5px_rgba(0,0,0,0.1)] pb-safe">
+                {/* Increased height to h-20 and added pb-2 for lift */}
+                <div className="flex justify-around items-center h-20 pb-2 px-2">
                     {navItems.map(item => {
                         const isActive = activeTab === item.value;
                         return (
                             <button key={item.value} onClick={() => setActiveTab(item.value)} className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-all duration-200 active:scale-90 feedback-button`}>
                                 <div className={`p-1.5 rounded-full transition-colors duration-300 ${isActive ? 'bg-slate-900 text-lime-400 shadow-lg shadow-slate-900/20' : 'text-slate-400'}`}>
-                                    <item.icon className="w-5 h-5" />
+                                    <item.icon className="w-6 h-6" /> {/* Slightly larger icons */}
                                 </div>
                                 <span className={`text-[10px] font-medium transition-colors ${isActive ? 'text-slate-900' : 'text-slate-400'}`}>{item.label}</span>
                             </button>
