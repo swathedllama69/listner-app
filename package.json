@@ -15,6 +15,7 @@
     "@capacitor/browser": "^7.0.2",
     "@capacitor/cli": "^7.4.4",
     "@capacitor/core": "^7.4.4",
+    "@capacitor/push-notifications": "^7.0.3",
     "@capacitor/splash-screen": "^7.0.3",
     "@next/bundle-analyzer": "^16.0.3",
     "@radix-ui/react-accordion": "^1.2.12",
