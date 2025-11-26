@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, Wallet } from "lucide-react"
+import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SidebarLayout } from "@/components/ui/SidebarLayout"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -279,11 +279,11 @@ export function Dashboard({ user, household }: { user: User, household: Househol
             // Listeners
             PushNotifications.addListener('registration', async (token) => {
                 console.log('📲 Push Registration Token:', token.value);
-                // Save to Supabase
-                const { error } = await supabase.from('profile_tokens').upsert({
+                // ⚡ FIX: Save to "device_tokens" (not profile_tokens)
+                const { error } = await supabase.from('device_tokens').upsert({
                     user_id: user.id,
                     token: token.value,
-                    updated_at: new Date().toISOString()
+                    // removed updated_at if your table doesn't have it, or keep if it does
                 }, { onConflict: 'token' });
 
                 if (error) console.error("❌ DB Token Save Error:", error.message);
@@ -349,7 +349,8 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         <SidebarLayout user={user} household={household} memberCount={memberCount} activeTab={activeTab} setActiveTab={setActiveTab}>
             <div className="w-full pb-24 relative">
 
-                {/* --- HEADER --- */}
+                {/* --- HEADER with Status Bar Fix (pt-12) --- */}
+                {/* ⚡ FIX: Added 'pt-12 md:pt-0' to push content down on mobile */}
                 <div className="hidden md:flex flex-row items-center justify-between gap-4 mb-6">
                     <div>
                         <h1 className="text-lg font-semibold text-slate-500 tracking-tight">{getPageTitle(activeTab)}</h1>
@@ -368,7 +369,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     </div>
                 </div>
 
-                <div className="md:hidden mb-6 space-y-3">
+                <div className="md:hidden mb-6 space-y-3 pt-12"> {/* <--- ADDED PT-12 HERE */}
                     <div className="flex justify-between items-center">
                         <h1 className="text-xl font-bold text-slate-800 tracking-tight">{getPageTitle(activeTab)}</h1>
                         {memberCount < 2 && (
@@ -400,7 +401,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                             household={household}
                             currencySymbol={currencySymbol}
                             hideBalances={hideBalances}
-                            refreshTrigger={refreshKey} // PASSED HERE
+                            refreshTrigger={refreshKey}
                         />
                     </TabsContent>
 
@@ -411,7 +412,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                             listType="wishlist"
                             onListSelected={setIsListDetailActive}
                             currencySymbol={currencySymbol}
-                            refreshTrigger={refreshKey} // PASSED HERE
+                            refreshTrigger={refreshKey}
                         />
                     </TabsContent>
 
@@ -422,7 +423,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                             listType="shopping"
                             onListSelected={setIsListDetailActive}
                             currencySymbol={currencySymbol}
-                            refreshTrigger={refreshKey} // PASSED HERE
+                            refreshTrigger={refreshKey}
                         />
                     </TabsContent>
 
@@ -432,7 +433,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                             household={household}
                             currencySymbol={currencySymbol}
                             hideBalances={hideBalances}
-                            refreshTrigger={refreshKey} // PASSED HERE
+                            refreshTrigger={refreshKey}
                         />
                     </TabsContent>
 
@@ -453,7 +454,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     context={activeTab}
                     user={user}
                     household={household}
-                    onSuccess={handleGlobalRefresh} // TRIGGERS REFRESH
+                    onSuccess={handleGlobalRefresh}
                     currencySymbol={currencySymbol}
                 />
 

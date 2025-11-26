@@ -210,18 +210,19 @@ function AuthWrapper() {
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   };
 
-  const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
+  // 💡 FIX: Added 'pt-12' manual padding as safe-area fallback
+  const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pt-12 pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
 
   switch (stage) {
     case 'LOADING': return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white p-6 text-center">
+      <div className={`${safeAreaWrapper} bg-slate-900 items-center justify-center text-center p-6`}>
         <Loader2 className="w-12 h-12 animate-spin text-emerald-400 mb-6" />
         <h2 className="text-lg font-semibold text-white mb-2">Loading...</h2>
         <p className="text-xs text-slate-400 font-mono bg-slate-800 px-3 py-2 rounded-lg border border-slate-700">{debugMsg}</p>
       </div>
     );
     case 'ERROR': return (
-      <div className={`flex flex-col items-center justify-center bg-slate-50 p-6 text-center ${safeAreaWrapper}`}>
+      <div className={`${safeAreaWrapper} bg-slate-50 items-center justify-center text-center p-6`}>
         <div className="bg-rose-100 p-4 rounded-full mb-4"><AlertTriangle className="w-8 h-8 text-rose-600" /></div>
         <h2 className="text-xl font-bold text-slate-900 mb-2">Login Issue</h2>
         <p className="text-sm text-slate-500 mb-6">We couldn't load your profile.</p>
@@ -236,7 +237,7 @@ function AuthWrapper() {
     case 'AUTH': return <div className={safeAreaWrapper}><AuthPage /></div>;
     case 'TUTORIAL': return <div className={safeAreaWrapper}><Tutorial onComplete={handleTutorialComplete} /></div>;
     case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => loadUserData(u)} /></div>;
-    case 'APP': return <div className={safeAreaWrapper}><Dashboard user={user!} household={household!} /></div>;
+    case 'APP': return <div className="pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col"><Dashboard user={user!} household={household!} /></div>;
     default: return null;
   }
 }
