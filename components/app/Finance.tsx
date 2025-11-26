@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, FormEvent, useRef } from "react"
+import { useState, useEffect, FormEvent } from "react"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
@@ -8,7 +8,7 @@ import { Household } from "@/lib/types"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
     DollarSign, Wallet, History, HandCoins, Pencil, Trash2,
-    ChevronDown, ChevronLeft, ChevronRight, Download, CheckCircle,
+    ChevronDown, ChevronLeft, ChevronRight, Download,
     Info, Lightbulb, FileSpreadsheet, ArrowRightLeft
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -42,8 +42,15 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
 
     useEffect(() => {
         async function fetchFinanceData() {
-            const { data: memberData } = await supabase.from('household_members').select('user_id').eq('household_id', household.id);
-            if (memberData) setMembers(memberData.map((m: any) => ({ user_id: m.user_id, email: m.user_id === user?.id ? 'Me' : 'Partner' })));
+            const { data: memberData } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
+            // Fix: Correctly map joined profile email or fallback
+            if (memberData) {
+                const mappedMembers = memberData.map((m: any) => ({
+                    user_id: m.user_id,
+                    email: m.profiles?.email || 'Partner'
+                }));
+                setMembers(mappedMembers);
+            }
 
             const { data: expenseData } = await supabase.from('expenses').select('*').eq('household_id', household.id).order('expense_date', { ascending: false });
             if (expenseData) setExpenses(expenseData as Expense[]);
@@ -62,12 +69,13 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
 
         const creditChannel = supabase.channel('credits_changes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'credits', filter: `household_id=eq.${household.id}` }, (payload) => {
+                if (payload.eventType === 'INSERT') setCredits((prev) => [payload.new as Credit, ...prev]);
                 if (payload.eventType === 'UPDATE') setCredits((prev) => prev.map(c => c.id === payload.new.id ? payload.new as Credit : c));
                 if (payload.eventType === 'DELETE') setCredits((prev) => prev.filter(c => c.id !== payload.old.id));
             }).subscribe()
 
         return () => { supabase.removeChannel(expenseChannel); supabase.removeChannel(creditChannel) }
-    }, [household.id, user, refreshTrigger]); // Added refreshTrigger
+    }, [household.id, user, refreshTrigger]);
 
     const downloadCSV = (content: string, filename: string) => {
         const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
@@ -163,19 +171,14 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances 
     return (
         <div className="space-y-6 p-2">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* LIFETIME SPEND - Slate/Blue */}
                 <Card className="rounded-2xl border-none shadow-lg bg-gradient-to-br from-slate-500 to-slate-700 text-white">
                     <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-[10px] font-bold text-slate-200 uppercase tracking-wider">Lifetime Spend</CardTitle><History className="w-4 h-4 text-slate-300" /></CardHeader>
                     <CardContent><div className="text-2xl font-bold">{currencySymbol}{format(totalExpenses)}</div></CardContent>
                 </Card>
-
-                {/* MONTHLY SPEND - Indigo */}
                 <Card className="rounded-2xl border-none shadow-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-white">
                     <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-[10px] font-bold text-indigo-200 uppercase tracking-wider">{now.toLocaleString('default', { month: 'long' })} Spend</CardTitle><Wallet className="w-4 h-4 text-indigo-200" /></CardHeader>
                     <CardContent><div className="text-2xl font-bold">{currencySymbol}{format(monthExpenses)}</div></CardContent>
                 </Card>
-
-                {/* UNSETTLED - Rose/Amber */}
                 <Card className="rounded-2xl border-none shadow-lg bg-gradient-to-br from-amber-500 to-orange-600 text-white">
                     <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-[10px] font-bold text-amber-100 uppercase tracking-wider">Unsettled Items</CardTitle><HandCoins className="w-4 h-4 text-amber-100" /></CardHeader>
                     <CardContent><div className="text-2xl font-bold">{activeCredits.length}</div></CardContent>
@@ -209,7 +212,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: number } | null>(null);
-    const [expandedId, setExpandedId] = useState<number | null>(null);
     const [filter, setFilter] = useState<'All' | 'Month' | 'Prev'>('Month');
     const [page, setPage] = useState(1);
     const ITEMS_PER_PAGE = 10;
@@ -233,7 +235,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
 
             if (expenseError) throw expenseError;
 
-            // 1. AUTO-REFRESH: Manually update state so user sees it immediately
             setExpenses(prev => [expense as Expense, ...prev]);
 
             if (form.isReimbursable && hasPartners) {
@@ -256,7 +257,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
         if (!deleteConfirm) return;
         const { error } = await supabase.from('expenses').delete().eq('id', deleteConfirm.id);
         if (error) alert(error.message);
-        // Optimistic delete
         else setExpenses(prev => prev.filter(e => e.id !== deleteConfirm.id));
         setDeleteConfirm(null);
     }
@@ -265,7 +265,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
         const { error } = await supabase.from('expenses').update({ name: updatedForm.name, amount: parseFloat(updatedForm.amount), category: updatedForm.category, notes: updatedForm.notes }).eq('id', editingExpense.id);
         if (error) alert(error.message);
         else {
-            // Optimistic update
             setExpenses(prev => prev.map(e => e.id === editingExpense.id ? { ...e, ...updatedForm, amount: parseFloat(updatedForm.amount) } : e));
             setEditingExpense(null);
         }
@@ -284,10 +283,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
         <div className="space-y-6">
             <Card className="border-none shadow-sm bg-white p-5 rounded-2xl">
                 <CardTitle className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Add Expense</CardTitle>
-                <div className="bg-slate-50 border border-slate-100 p-3 rounded-lg text-xs text-slate-500 flex gap-2 items-start mb-4">
-                    <Lightbulb className="w-4 h-4 shrink-0 mt-0.5" />
-                    <div>Enter unit price and quantity to auto-calculate total, or just enter total directly.</div>
-                </div>
                 <form onSubmit={handleExpenseSubmit} className="space-y-4">
                     <div className="grid grid-cols-4 gap-3">
                         <div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} className="bg-slate-50 h-10 text-center" /></div>
@@ -304,15 +299,19 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
             </Card>
             <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">History</h3><div className="flex gap-1">{['Month', 'Prev', 'All'].map((f: any) => (<button key={f} onClick={() => { setFilter(f); setPage(1); }} className={`text-[10px] px-2 py-1 rounded-md font-bold transition-colors ${filter === f ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-600 bg-slate-50'}`}>{f === 'Month' ? 'This Month' : f === 'Prev' ? 'Last Month' : 'All Time'}</button>))}</div></div>
-                {paginatedExpenses.length === 0 ? <div className="text-center py-8 text-slate-400 text-xs">No expenses found for this filter.</div> :
+                {paginatedExpenses.length === 0 ? <div className="text-center py-8 text-slate-400 text-xs">No expenses found.</div> :
                     paginatedExpenses.map((expense) => (
-                        <div key={expense.id} className={`bg-white border rounded-xl shadow-sm transition-all cursor-pointer hover:border-slate-200`} onClick={() => setEditingExpense(expense)}>
+                        <div key={expense.id} className={`bg-white border rounded-xl shadow-sm transition-all cursor-pointer hover:border-indigo-200 group relative`} onClick={() => setEditingExpense(expense)}>
                             <div className="flex justify-between items-center p-3">
                                 <div className="flex items-center gap-3">
                                     <div className={`h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-100 text-slate-500`}>{expense.category.substring(0, 2).toUpperCase()}</div>
                                     <div><p className="font-semibold text-slate-800 text-sm">{expense.name}</p><p className="text-[10px] text-slate-500">{new Date(expense.expense_date).toLocaleDateString()}</p></div>
                                 </div>
-                                <div className="flex items-center gap-2"><span className="font-bold text-slate-700 text-sm">{currencySymbol}{hideBalances ? '****' : expense.amount.toLocaleString()}</span></div>
+                                <div className="flex items-center gap-2">
+                                    <span className="font-bold text-slate-700 text-sm">{currencySymbol}{hideBalances ? '****' : expense.amount.toLocaleString()}</span>
+                                    {/* EDIT ICON */}
+                                    <Pencil className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-500 transition-colors" />
+                                </div>
                             </div>
                         </div>
                     ))}
@@ -324,18 +323,18 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
             <Dialog open={!!editingExpense} onOpenChange={() => setEditingExpense(null)}>
                 {editingExpense && <DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit Expense</DialogTitle><DialogDescription>Update transaction details.</DialogDescription></DialogHeader>
                     <div className="flex justify-end mb-2"><Button variant="ghost" size="sm" className="text-rose-500 hover:bg-rose-50" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingExpense.id }); setEditingExpense(null); }}><Trash2 className="w-4 h-4 mr-2" /> Delete</Button></div>
-                    <EditExpenseForm expense={editingExpense} setEditingExpense={setEditingExpense} onExpenseUpdated={handleExpenseUpdated} categories={EXPENSE_CATEGORIES} currencySymbol={currencySymbol} />
+                    <EditExpenseForm expense={editingExpense} onExpenseUpdated={handleExpenseUpdated} categories={EXPENSE_CATEGORIES} currencySymbol={currencySymbol} />
                 </DialogContent>}
             </Dialog>
         </div>
     );
 }
 
-function EditExpenseForm({ expense, setEditingExpense, onExpenseUpdated, categories, currencySymbol }: { expense: Expense; setEditingExpense: any; onExpenseUpdated: any; categories: string[]; currencySymbol: string; }) {
+function EditExpenseForm({ expense, onExpenseUpdated, categories, currencySymbol }: { expense: Expense; onExpenseUpdated: any; categories: string[]; currencySymbol: string; }) {
     const [form, setForm] = useState({ name: expense.name, amount: expense.amount.toString(), category: expense.category, notes: expense.notes || '' });
     const handleSubmit = (e: FormEvent) => { e.preventDefault(); onExpenseUpdated(form); };
     return (
-        <form onSubmit={handleSubmit} className="space-y-4"><div className="grid grid-cols-2 gap-4"><div><Label>Amount ({currencySymbol})</Label><Input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></div><div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div></div><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /><DialogFooter><Button type="submit" className='bg-teal-600'>Save</Button></DialogFooter></form>
+        <form onSubmit={handleSubmit} className="space-y-4"><div className="grid grid-cols-2 gap-4"><div><Label>Amount ({currencySymbol})</Label><Input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></div><div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div></div><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /><DialogFooter><Button type="submit" className='bg-teal-600'>Save Changes</Button></DialogFooter></form>
     );
 }
 
@@ -365,6 +364,36 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         if (error) { alert(error.message); } else { setCredits([data as Credit, ...credits]); setForm({ amount: '', notes: '', direction: 'owe_me', personName: '' }); }
     }
 
+    // ⚡ NEW: Function to handle updates from the Edit Dialog
+    const handleUpdateCredit = async (updated: { amount: number, notes: string, direction: string, personName: string }) => {
+        if (!editingCredit) return;
+
+        const isOweMe = updated.direction === 'owe_me';
+        let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
+        let lenderName = isOweMe ? 'Me' : updated.personName; let borrowerName = !isOweMe ? 'Me' : updated.personName;
+
+        // If household has a partner and no specific name provided, default to partner
+        if (partnerId && !updated.personName && !isSingleUser) {
+            if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
+            else { lenderId = partnerId; lenderName = 'Partner'; }
+        }
+
+        const { error, data } = await supabase.from('credits').update({
+            amount: updated.amount,
+            notes: updated.notes,
+            lender_user_id: lenderId,
+            lender_name: lenderName,
+            borrower_user_id: borrowerId,
+            borrower_name: borrowerName
+        }).eq('id', editingCredit.id).select().single();
+
+        if (error) alert(error.message);
+        else {
+            setCredits(prev => prev.map(c => c.id === editingCredit.id ? data as Credit : c));
+            setEditingCredit(null);
+        }
+    }
+
     const activeCredits = credits.filter(c => !c.is_settled);
     const settledCredits = credits.filter(c => c.is_settled);
 
@@ -375,8 +404,15 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
                 {activeCredits.length === 0 ? <p className="text-slate-400 text-center py-4 text-sm">All settled up!</p> : activeCredits.map(c => {
                     const isOwedToMe = c.lender_user_id === user.id;
                     return (
-                        <div key={c.id} onClick={() => setEditingCredit(c)} className={`flex justify-between items-center p-3 mb-2 rounded-lg border cursor-pointer hover:shadow-sm ${isOwedToMe ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
-                            <div><div className="flex items-center gap-2"><span className={`font-bold ${isOwedToMe ? 'text-emerald-700' : 'text-rose-700'}`}>{currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()}</span><Badge variant="outline" className="bg-white text-xs font-normal">{isOwedToMe ? "Owed to You" : "You Owe"}</Badge></div><p className="text-xs text-slate-500 mt-1">{c.notes}</p></div>
+                        <div key={c.id} onClick={() => setEditingCredit(c)} className={`group flex justify-between items-center p-3 mb-2 rounded-lg border cursor-pointer hover:shadow-md transition-all ${isOwedToMe ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+                            <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                    <span className={`font-bold ${isOwedToMe ? 'text-emerald-700' : 'text-rose-700'}`}>{currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()}</span>
+                                    <Badge variant="outline" className="bg-white text-xs font-normal">{isOwedToMe ? "Owed to You" : "You Owe"}</Badge>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1 font-medium">{c.notes} <span className="opacity-50">• {isOwedToMe ? c.borrower_name : c.lender_name}</span></p>
+                            </div>
+                            <Pencil className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />
                         </div>
                     )
                 })}
@@ -387,15 +423,64 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
             {settledCredits.length > 0 && (<Accordion type="single" collapsible className="bg-white rounded-xl border border-slate-100 px-4"><AccordionItem value="settled" className="border-none"><AccordionTrigger className="text-slate-500 hover:no-underline text-sm">Settled History</AccordionTrigger><AccordionContent>{settledCredits.map(c => (<div key={c.id} className="flex justify-between py-2 border-b border-slate-50 last:border-0 text-xs text-slate-400"><span>{c.lender_user_id === user.id ? "Was Owed" : "Did Owe"} {currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()} - {c.notes}</span><Trash2 className="w-3 h-3 cursor-pointer hover:text-rose-500" onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, action: 'delete' })} /></div>))}</AccordionContent></AccordionItem></Accordion>)}
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title={deleteConfirm?.action === 'settle' ? "Settle Debt?" : "Delete Entry?"} description="Confirm action." onConfirm={handleAction} />
 
+            {/* ⚡ FIX: Improved Edit Credit Dialog */}
             <Dialog open={!!editingCredit} onOpenChange={() => setEditingCredit(null)}>
-                {editingCredit && <DialogContent className="sm:max-w-sm">
-                    <DialogHeader><DialogTitle>Manage Debt</DialogTitle><DialogDescription>Settle or remove this record.</DialogDescription></DialogHeader>
-                    <div className="flex flex-col gap-3">
-                        <Button className="w-full bg-emerald-600 hover:bg-emerald-700" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingCredit.id, action: 'settle' }); setEditingCredit(null); }}>Mark as Settled</Button>
-                        <Button variant="outline" className="w-full text-rose-600 border-rose-200 hover:bg-rose-50" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingCredit.id, action: 'delete' }); setEditingCredit(null); }}>Delete Record</Button>
-                    </div>
-                </DialogContent>}
+                {editingCredit && (
+                    <DialogContent className="sm:max-w-sm">
+                        <DialogHeader><DialogTitle>Manage Debt</DialogTitle><DialogDescription>Edit or Settle this debt.</DialogDescription></DialogHeader>
+
+                        <EditCreditForm credit={editingCredit} userId={user.id} onUpdate={handleUpdateCredit} partnerId={partnerId} isSingleUser={isSingleUser} currencySymbol={currencySymbol} />
+
+                        <div className="flex gap-2 mt-2 pt-2 border-t border-slate-100">
+                            <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingCredit.id, action: 'settle' }); setEditingCredit(null); }}>Mark Settled</Button>
+                            <Button variant="ghost" className="flex-none text-rose-500 hover:bg-rose-50" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingCredit.id, action: 'delete' }); setEditingCredit(null); }}><Trash2 className="w-4 h-4" /></Button>
+                        </div>
+                    </DialogContent>
+                )}
             </Dialog>
+        </div>
+    )
+}
+
+// ⚡ NEW: Dedicated Edit Form for Credits to handle "Who Owes Who" logic
+function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, currencySymbol }: any) {
+    const isOriginallyOwedToMe = credit.lender_user_id === userId;
+    const [form, setForm] = useState({
+        amount: credit.amount,
+        notes: credit.notes || '',
+        direction: isOriginallyOwedToMe ? 'owe_me' : 'i_owe',
+        personName: isOriginallyOwedToMe ? credit.borrower_name : credit.lender_name
+    });
+
+    // If it's a partner debt, we hide the name field usually, unless user wants to manually override
+    const isSystemUser = (isOriginallyOwedToMe && credit.borrower_user_id) || (!isOriginallyOwedToMe && credit.lender_user_id);
+
+    return (
+        <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-3">
+                <Button variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 text-white' : ''} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button>
+                <Button variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 text-white' : ''} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button>
+            </div>
+            <div>
+                <Label>Amount ({currencySymbol})</Label>
+                <Input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: parseFloat(e.target.value) })} />
+            </div>
+            <div>
+                <Label>Person / Entity</Label>
+                <Input
+                    value={form.personName}
+                    onChange={e => setForm({ ...form, personName: e.target.value })}
+                    // Disable edit if it's linked to a real partner user to prevent desync, unless user wants to switch to manual? 
+                    // User asked to "customize or change the name". So we enable it but hint it might disconnect user link.
+                    placeholder="Name"
+                />
+                {isSystemUser && <p className="text-[10px] text-slate-400 mt-1">Currently linked to Partner.</p>}
+            </div>
+            <div>
+                <Label>Notes</Label>
+                <Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+            </div>
+            <Button onClick={() => onUpdate(form)} className="w-full bg-slate-900">Save Changes</Button>
         </div>
     )
 }

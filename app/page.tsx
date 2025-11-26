@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase, saveDeviceTokenToDB } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
 import { Dashboard } from '@/components/app/Dashboard';
 import { OnboardingScreen } from '@/components/app/OnboardingScreen';
@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
+import { PushNotifications } from '@capacitor/push-notifications';
 
 /* eslint-disable @next/next/no-img-element */
 
@@ -41,29 +42,104 @@ function AuthWrapper() {
   const listenersInitialized = useRef(false);
   const processedUrls = useRef<Set<string>>(new Set());
 
+  // --- 💡 PUSH NOTIFICATION SETUP ---
+  const setupPushNotifications = async (currentUser: User) => {
+    if (!Capacitor.isNativePlatform()) return;
+
+    console.log("🔔 Initializing Push Notifications...");
+
+    let permStatus = await PushNotifications.checkPermissions();
+    if (permStatus.receive !== 'granted') {
+      permStatus = await PushNotifications.requestPermissions();
+    }
+
+    if (permStatus.receive !== 'granted') {
+      console.warn("🚫 Push permission denied");
+      return;
+    }
+
+    await PushNotifications.register();
+
+    // Ensure channel exists
+    await PushNotifications.createChannel({
+      id: 'PushNotifications',
+      name: 'General Notifications',
+      importance: 5,
+      visibility: 1,
+      sound: 'default',
+      vibration: true,
+    });
+
+    await PushNotifications.removeAllListeners();
+
+    PushNotifications.addListener('registration', async (token) => {
+      console.log('📲 Push Registration Token:', token.value);
+      await saveDeviceTokenToDB(currentUser.id, token.value, 'android');
+    });
+
+    PushNotifications.addListener('registrationError', (error) => {
+      console.error('❌ Push Registration Error:', error);
+    });
+
+    PushNotifications.addListener('pushNotificationReceived', (notification) => {
+      console.log('🔔 Push Received:', notification);
+    });
+
+    PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+      console.log('👉 Push Action:', action);
+    });
+  };
+
   // --- 1. CORE DATA FETCHING ---
   const loadUserData = async (currentUser: User) => {
     try {
       setDebugMsg("Loading Profile...");
 
-      // ⚡ OPTIMIZATION: Try to Read First (Fast)
+      // 💡 TRIGGER PUSH SETUP
+      setupPushNotifications(currentUser);
+
+      // 💡 UPDATE PROFILE: Activity & Version
+      let appVersion = 'Web';
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const info = await App.getInfo();
+          appVersion = info.version; // e.g. "1.0.0"
+        } catch (e) {
+          console.warn("Could not get app version", e);
+        }
+      }
+
+      // Update Last Active & Version
+      await supabase.from('profiles').update({
+        last_active_at: new Date().toISOString(),
+        app_version: appVersion
+      }).eq('id', currentUser.id);
+
+      // Track Online Presence
+      const channel = supabase.channel('online-users');
+      channel.track({ user_id: currentUser.id, online_at: new Date().toISOString() });
+      channel.subscribe();
+
+      let username = currentUser.email?.split('@')[0] || 'user';
+      if (username.length < 3) username = username + '_user';
+
+      // ⚡ OPTIMIZATION: Try to Read First
       let { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', currentUser.id)
         .single();
 
-      // Only Write if Profile is Missing (Slow)
+      // Only Write if Profile is Missing
       if (!profile) {
-        let username = currentUser.email?.split('@')[0] || 'user';
-        if (username.length < 3) username = username + '_user';
-
         const { data: newProfile, error: createError } = await supabase
           .from('profiles')
           .upsert({
             id: currentUser.id,
             email: currentUser.email,
             username: username,
+            app_version: appVersion, // Save version on creation too
+            has_seen_tutorial: false
           }, { onConflict: 'id' })
           .select('*')
           .single();
@@ -81,7 +157,7 @@ function AuthWrapper() {
         .eq("user_id", currentUser.id)
         .maybeSingle();
 
-      if (memberError) console.error("❌ Household Member Error:", memberError);
+      if (memberError) console.error("Household Check Error:", memberError);
 
       if (memberData && memberData.households) {
         currentHousehold = Array.isArray(memberData.households) ? memberData.households[0] as Household : memberData.households as Household;
@@ -103,7 +179,7 @@ function AuthWrapper() {
 
     } catch (err: any) {
       console.error("💥 CRITICAL LOAD ERROR:", JSON.stringify(err));
-      setErrorDetails(err.message || JSON.stringify(err) || "Unknown error loading user data.");
+      setErrorDetails(err.message || "Unknown error loading data.");
       setStage('ERROR');
     }
   };
@@ -120,7 +196,7 @@ function AuthWrapper() {
     try {
       const { data: existing } = await supabase.auth.getSession();
       if (existing.session?.user) {
-        console.log("✅ Already logged in, skipping exchange.");
+        console.log("✅ Already logged in.");
         await loadUserData(existing.session.user);
         return;
       }
@@ -154,7 +230,7 @@ function AuthWrapper() {
     }
   };
 
-  // --- 3. INITIALIZATION EFFECTS ---
+  // --- 3. INITIALIZATION ---
   useEffect(() => {
     if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
       listenersInitialized.current = true;
@@ -181,13 +257,13 @@ function AuthWrapper() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        loadUserData(session.user);
+        // Only load if we aren't already loaded (prevent double execution)
+        if (!user) loadUserData(session.user);
       } else if (event === 'SIGNED_OUT') {
         window.location.reload();
       }
     });
 
-    // 💡 FIX: Increased timeout to 60 seconds for slow Google redirects
     const timeout = setTimeout(() => {
       if (stage === 'LOADING') {
         console.warn("⚠️ App stuck on loading. Resetting...");
@@ -200,7 +276,7 @@ function AuthWrapper() {
       subscription.unsubscribe();
       clearTimeout(timeout);
     };
-  }, [stage]);
+  }, [stage]); // Added stage dependency to ensure timeout check is current
 
   const handleTutorialComplete = async () => {
     if (!user) return;
@@ -210,7 +286,6 @@ function AuthWrapper() {
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   };
 
-  // 💡 FIX: Added 'pt-12' manual padding as safe-area fallback
   const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pt-12 pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
 
   switch (stage) {
@@ -253,14 +328,13 @@ function AuthPage() {
   const [authMethod, setAuthMethod] = useState<'password' | 'magic_link' | 'forgot_password'>('password');
   const [activeTab, setActiveTab] = useState<'signin' | 'signup'>('signin');
 
+  // ... (Animation and Feature arrays same as before)
   const features = [
     { title: "The Best List App", desc: "Say goodbye to old spreadsheets. ListNer is the new command center for your household.", icon: ListChecks, color: "bg-teal-600" },
-    { title: "Sync Your Home", desc: "Coordinate all lists, tasks, and goals in real-time with buddy or partners.", icon: Users, color: "bg-teal-500" },
+    { title: "Sync Your Home", desc: "Coordinate all lists, tasks, and goals in real-time with family or partners.", icon: Users, color: "bg-teal-500" },
     { title: "One-Stop Finance", desc: "Easily track shared expenses and automate IOU calculations instantly.", icon: Wallet, color: "bg-emerald-500" },
     { title: "Fully Secured", desc: "Your financial and household data is protected with enterprise-grade encryption.", icon: ShieldCheck, color: "bg-indigo-500" },
   ];
-
-  // 💡 RESTORED ANIMATION ITEMS
   const animationItems = [
     { type: '🍎', size: 10, duration: 18, delay: 0, top: '10%', left: '10%', animKey: 'slowDrift1', isEmoji: true, opacity: 0.25 },
     { type: '💵', size: 14, duration: 18, delay: 10, bottom: '10%', left: '40%', animKey: 'slowDrift3', isEmoji: true, opacity: 0.15 },
@@ -340,6 +414,9 @@ function AuthPage() {
   return (
     <div className="relative flex-1 flex overflow-hidden bg-slate-50">
       <style jsx global>{`
+        @keyframes blob { 0%, 100% { transform: translate(0, 0) scale(1); } 25% { transform: translate(-200px, 150px) scale(1.1); } 50% { transform: translate(250px, -150px) scale(0.9); } 75% { transform: translate(-150px, -100px) scale(1.2); } }
+        .animation-delay-2000 { animation-delay: 2s; }
+        .animation-delay-4000 { animation-delay: 4s; }
         @keyframes slowDrift1 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 33% { transform: translate(10vw, 20vh) rotate(10deg); } 66% { transform: translate(-15vw, 5vh) rotate(-5deg); } }
         @keyframes slowDrift2 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(-10vw, -10vh) rotate(-10deg); } 80% { transform: translate(10vw, 15vh) rotate(5deg); } }
         @keyframes slowDrift3 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 20% { transform: translate(25vw, -5vh) rotate(15deg); } 70% { transform: translate(-5vw, 25vh) rotate(-15deg); } }
@@ -357,10 +434,7 @@ function AuthPage() {
         @keyframes slowDrift15 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 35% { transform: translate(-15vw, 10vh) rotate(-10deg); } }
       `}</style>
       <div className="absolute inset-0 z-0">
-        {/* ⚡ OPTIMIZATION: Static gradient background instead of heavy blurs */}
         <div className="absolute inset-0 bg-gradient-to-br from-teal-50 via-white to-indigo-50 opacity-80"></div>
-
-        {/* ⚡ RESTORED: Floating items (lightweight) */}
         {animationItems.map((item, index) => {
           const sizeInPixels = item.size * (item.isEmoji ? 6 : 4.5);
           const IconComponent = item.Icon;

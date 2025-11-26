@@ -60,33 +60,7 @@ async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string
   }
 }
 
-// --- HELPER: RESOLVE HOUSEHOLD ID ---
-// Some tables (like items) might be inside a list, so we need to fetch the parent to find the household.
-async function resolveHouseholdId(supabase: any, table: string, record: any): Promise<string | null> {
-  // 1. Direct check: If the record has household_id, use it.
-  if (record.household_id) return record.household_id;
-
-  // 2. Shopping Items: Fetch parent List
-  if (table === 'shopping_items' && record.list_id) {
-    const { data } = await supabase.from('lists').select('household_id').eq('id', record.list_id).single();
-    return data?.household_id || null;
-  }
-
-  // 3. Wishlist Items (Goals): Fetch parent Wishlist (assuming table is 'wishlists' or 'lists')
-  if (table === 'wishlist_items' && (record.wishlist_id || record.list_id)) {
-    const parentId = record.wishlist_id || record.list_id;
-    // Try 'wishlists' table first, fall back to 'lists' if your schema uses that
-    let { data } = await supabase.from('wishlists').select('household_id').eq('id', parentId).single();
-    if (!data) {
-      ({ data } = await supabase.from('lists').select('household_id').eq('id', parentId).single());
-    }
-    return data?.household_id || null;
-  }
-
-  return null;
-}
-
-// --- MAIN FUNCTION ---
+// --- MAIN ADMIN FUNCTION ---
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -101,114 +75,51 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // 1. Parse Payload
-    const payload = await req.json()
-    const { type, table, record } = payload
+    // 1. VERIFY ADMIN AUTH
+    const authHeader = req.headers.get('Authorization')
+    if (!authHeader) throw new Error("Missing Auth Header")
 
-    console.log(`🔔 Webhook: ${type} on ${table}`)
+    const token = authHeader.replace('Bearer ', '')
+    const { data: { user }, error } = await supabase.auth.getUser(token)
 
-    if (type !== 'INSERT') {
-      return new Response(JSON.stringify({ message: 'Ignored: Not an INSERT' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
+    if (error || !user) throw new Error("Unauthorized")
 
-    // 2. Define Message Content based on Table
-    let title = "ListNer Update"
-    let body = "New activity in your household"
-    let householdId = null;
+    // Check if the user is actually an admin
+    const { data: adminRecord } = await supabase
+      .from('admins')
+      .select('role')
+      .eq('id', user.id)
+      .single()
 
-    switch (table) {
-      case 'expenses':
-        title = "💸 New Expense Added";
-        body = `Amount: ${record.amount} - ${record.description || 'No desc'}`;
-        break;
+    if (!adminRecord) throw new Error("Forbidden: You are not an Admin")
 
-      case 'lists':
-        title = "📝 New List Created";
-        body = `List: "${record.name}" was added.`;
-        break;
+    // 2. Parse Message Content
+    const { title, body } = await req.json()
 
-      case 'shopping_items':
-        title = "🛒 New Shopping Item";
-        body = `${record.name || 'Item'} was added to the list.`;
-        break;
-
-      case 'wishlist_items':
-        title = "🌟 New Goal Added";
-        body = `${record.name || 'Goal'} was added to the wishlist.`;
-        break;
-
-      case 'credits':
-        title = "💰 New Debt/Credit";
-        body = `A new record of ${record.amount} was added.`;
-        break;
-
-      case 'household_members':
-        title = "👋 New Member Joined";
-        body = "Someone new just joined your household!";
-        break;
-
-      default:
-        console.log(`Unknown table: ${table}`);
-        break;
-    }
-
-    // 3. Resolve the Household ID
-    householdId = await resolveHouseholdId(supabase, table, record);
-
-    if (!householdId) {
-      return new Response(JSON.stringify({ message: "Could not find household_id for this record" }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
-
-    // 4. Find Users to Notify (Exclude the Creator)
-    // Most tables have 'created_by' or 'user_id'. specific logic for members.
-    let excludeUserId = record.created_by || record.user_id;
-
-    const { data: members, error: memberError } = await supabase
-      .from('household_members')
-      .select('user_id')
-      .eq('household_id', householdId)
-      .neq('user_id', excludeUserId) // Don't notify the person who did the action
-
-    if (memberError || !members || members.length === 0) {
-      return new Response(JSON.stringify({ message: "No other members to notify" }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      })
-    }
-
-    const userIdsToNotify = members.map(m => m.user_id);
-
-    // 5. Get Device Tokens
-    const { data: tokens } = await supabase
-      .from('device_tokens')
-      .select('token')
-      .in('user_id', userIdsToNotify)
+    // 3. Get All Device Tokens (Broadcast Mode)
+    const { data: tokens } = await supabase.from('device_tokens').select('token')
 
     if (!tokens?.length) {
-      return new Response(JSON.stringify({ message: "No devices found" }), {
+      return new Response(JSON.stringify({ sent: 0, message: "No devices found in database" }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
-    console.log(`🚀 Sending to ${tokens.length} devices...`)
+    console.log(`🚀 Admin Broadcast: Sending to ${tokens.length} devices...`)
 
-    // 6. Send to FCM
+    // 4. Send to FCM
     const accessToken = await getAccessToken({ clientEmail, privateKey })
 
     const promises = tokens.map(t => {
-      const fcmPayload = {
+      const notificationPayload = {
         message: {
           token: t.token,
           notification: {
-            title: title,
-            body: body
+            title: title || "Announcement",
+            body: body || "New update available"
           },
           data: {
-            entity_id: String(record.id),
-            entity_type: table
+            type: 'admin_broadcast',
           },
           android: {
             notification: {
@@ -229,7 +140,7 @@ Deno.serve(async (req) => {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify(fcmPayload),
+          body: JSON.stringify(notificationPayload),
         }
       )
     })
@@ -241,7 +152,7 @@ Deno.serve(async (req) => {
     })
 
   } catch (err: any) {
-    console.error("Function Error:", err)
+    console.error("Broadcast Error:", err.message)
     return new Response(JSON.stringify({ error: err.message }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
