@@ -53,10 +53,11 @@ async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string
     })
 
     const data = await response.json()
+    if (data.error) throw new Error(`Google Auth Error: ${data.error_description}`)
     return data.access_token
 
   } catch (err: any) {
-    throw new Error(`Key Error: ${err.message}`)
+    throw new Error(`Key/Auth Error: ${err.message}`)
   }
 }
 
@@ -75,9 +76,7 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // 1. VERIFY ADMIN AUTH
-    // This function is NOT triggered by a database webhook. 
-    // It is triggered by a User/Admin making a request, so we check headers.
+    // 1. VERIFY ADMIN AUTH (Authorization, User existence, Admin role check)
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) throw new Error("Missing Auth Header")
 
@@ -86,7 +85,6 @@ Deno.serve(async (req) => {
 
     if (error || !user) throw new Error("Unauthorized")
 
-    // Check if the user is actually an admin
     const { data: adminRecord } = await supabase
       .from('admins')
       .select('role')
@@ -95,11 +93,10 @@ Deno.serve(async (req) => {
 
     if (!adminRecord) throw new Error("Forbidden: You are not an Admin")
 
-    // 2. Parse Message Content
-    const { title, body } = await req.json()
+    // 2. Parse Message Content (INCLUDING NEW FIELDS: IMAGE & LINK)
+    const { title, body, image, link } = await req.json()
 
     // 3. Get All Device Tokens (Broadcast Mode)
-    // You can filter this if you want to target specific segments later
     const { data: tokens } = await supabase.from('device_tokens').select('token')
 
     if (!tokens?.length) {
@@ -112,32 +109,41 @@ Deno.serve(async (req) => {
 
     // 4. Send to FCM
     const accessToken = await getAccessToken({ clientEmail, privateKey })
+    const messagesSent: string[] = []
 
-    const promises = tokens.map(t => {
-      // 💡 FIX APPLIED: Removed Flutter garbage, added Android Icon/Color
-      const notificationPayload = {
+    const promises = tokens.map(async t => {
+      // Build the base notification payload
+      const notificationPayload: any = {
         message: {
           token: t.token,
           notification: {
             title: title || "Announcement",
-            body: body || "New update available"
+            body: body || "New update available",
           },
           data: {
             type: 'admin_broadcast',
-            // Removed: click_action: "FLUTTER_NOTIFICATION_CLICK" (Not for Capacitor)
+            // Pass the optional link in the data payload
+            ...(link && { link }),
           },
           android: {
             notification: {
               channel_id: "PushNotifications",
-              icon: "push_icon", // Must match res/drawable/push_icon.png
-              color: "#0D9488",  // Teal-600
-              click_action: "MAIN_ACTIVITY" // Standard Android intent
+              icon: "push_icon",
+              color: "#10B981", // Changed color to match Teal-500/Emerald-500
+              click_action: "MAIN_ACTIVITY"
             }
           }
         }
       };
 
-      return fetch(
+      // CRITICAL FIX: Conditionally add the image property to the notification payload.
+      // This is necessary for rich notification support (iOS/Android banners).
+      if (image) {
+        // FCM uses 'image' inside the 'notification' object for rich media.
+        notificationPayload.message.notification.image = image;
+      }
+
+      const response = await fetch(
         `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
         {
           method: 'POST',
@@ -147,12 +153,21 @@ Deno.serve(async (req) => {
           },
           body: JSON.stringify(notificationPayload),
         }
-      )
+      );
+
+      const result = await response.json();
+      if (!response.ok) {
+        console.error(`FCM Error for token ${t.token}:`, result);
+        // We still resolve the promise to let Promise.all finish, but log the failure
+        return { success: false, token: t.token, error: result.error };
+      }
+      messagesSent.push(t.token);
+      return { success: true, token: t.token };
     })
 
-    const results = await Promise.all(promises)
+    await Promise.all(promises);
 
-    return new Response(JSON.stringify({ success: true, sent: results.length }), {
+    return new Response(JSON.stringify({ success: true, sent: messagesSent.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
 
