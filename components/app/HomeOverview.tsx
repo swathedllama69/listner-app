@@ -22,7 +22,7 @@ const CATEGORY_COLORS: { [key: string]: string } = {
     "Other": "#94a3b8"
 };
 
-export function HomeOverview({ user, household, currencySymbol, hideBalances }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean }) {
+export function HomeOverview({ user, household, currencySymbol, hideBalances, refreshTrigger }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number }) {
     const [loading, setLoading] = useState(true)
     const [stats, setStats] = useState({
         netBalance: 0, shoppingCount: 0, shoppingCost: 0, wishlistSaved: 0,
@@ -33,7 +33,9 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances }: 
     useEffect(() => {
         async function fetchGlobalStats() {
             try {
-                setLoading(true)
+                // Only set loading true if it's the initial load to avoid flickering on soft refresh
+                if (refreshTrigger === 0) setLoading(true)
+
                 const { data: dashboardData, error } = await supabase.rpc('get_global_dashboard_data', {
                     target_household_id: household.id,
                     current_user_id: user.id
@@ -60,7 +62,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances }: 
             } catch (error) { console.error("Error:", error) } finally { setLoading(false) }
         }
         fetchGlobalStats()
-    }, [household.id, user.id])
+    }, [household.id, user.id, refreshTrigger]) // Added refreshTrigger
 
     if (loading) return <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
 

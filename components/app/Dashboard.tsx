@@ -17,6 +17,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Progress } from "@/components/ui/progress"
 import { getCurrencySymbol, EXPENSE_CATEGORIES } from "@/lib/constants"
 import { Separator } from "@/components/ui/separator"
+import { PushNotifications } from '@capacitor/push-notifications';
+import { Capacitor } from '@capacitor/core';
 
 // Import sibling components
 import { ListDetail } from "@/components/app/ListDetail"
@@ -242,12 +244,65 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const [showOnboarding, setShowOnboarding] = useState(false);
     const [isSyncOpen, setIsSyncOpen] = useState(false);
 
-    // --- NEW STATE FOR REFRESHING ---
+    // --- REFRESH STATE ---
     const [refreshKey, setRefreshKey] = useState(0);
 
     const [hideBalances, setHideBalances] = useState(false);
 
     const currencySymbol = getCurrencySymbol(household.currency || 'NGN');
+
+    // --- ⚡ PUSH NOTIFICATION INIT ---
+    useEffect(() => {
+        if (Capacitor.isNativePlatform()) {
+            console.log("🔔 Initializing Push Notifications...");
+
+            const initPush = async () => {
+                try {
+                    let permStatus = await PushNotifications.checkPermissions();
+                    if (permStatus.receive === 'prompt') {
+                        permStatus = await PushNotifications.requestPermissions();
+                    }
+
+                    if (permStatus.receive !== 'granted') {
+                        console.warn("🚫 Push permission denied or ignored by user.");
+                        return;
+                    }
+
+                    await PushNotifications.register();
+                } catch (e) {
+                    console.error("⚠️ Push Init Error:", e);
+                }
+            }
+
+            initPush();
+
+            // Listeners
+            PushNotifications.addListener('registration', async (token) => {
+                console.log('📲 Push Registration Token:', token.value);
+                // Save to Supabase
+                const { error } = await supabase.from('profile_tokens').upsert({
+                    user_id: user.id,
+                    token: token.value,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'token' });
+
+                if (error) console.error("❌ DB Token Save Error:", error.message);
+                else console.log("✅ Device token saved to DB!");
+            });
+
+            PushNotifications.addListener('registrationError', (error) => {
+                console.error('❌ Push Registration Error: ' + JSON.stringify(error));
+            });
+
+            PushNotifications.addListener('pushNotificationReceived', (notification) => {
+                console.log('🔔 Push Received:', notification);
+            });
+
+            PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
+                console.log('🔔 Push Action:', notification.actionId, notification.inputValue);
+            });
+        }
+    }, [user.id]);
 
     useEffect(() => {
         const savedPrivacy = localStorage.getItem("listner_privacy_mode");
@@ -277,16 +332,14 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const formattedName = userName.charAt(0).toUpperCase() + userName.slice(1);
     const greeting = `${getGreeting()}, ${formattedName}`;
 
-    // Trigger a refresh
+    // --- GLOBAL REFRESH HANDLER ---
     const handleGlobalRefresh = () => {
         setRefreshKey(prev => prev + 1);
     }
 
     const handleOnboardingComplete = () => {
-        // Fix: Mark tutorial as seen so it doesn't pop up right after onboarding
         localStorage.setItem(`tutorial_seen_${user.id}`, "true");
         setShowOnboarding(false);
-        // Safe window reload to refresh data
         if (typeof window !== "undefined") {
             window.location.reload();
         }
@@ -296,7 +349,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         <SidebarLayout user={user} household={household} memberCount={memberCount} activeTab={activeTab} setActiveTab={setActiveTab}>
             <div className="w-full pb-24 relative">
 
-                {/* --- UPDATED HEADER LAYOUT --- */}
+                {/* --- HEADER --- */}
                 <div className="hidden md:flex flex-row items-center justify-between gap-4 mb-6">
                     <div>
                         <h1 className="text-lg font-semibold text-slate-500 tracking-tight">{getPageTitle(activeTab)}</h1>
@@ -342,19 +395,45 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
 
                     <TabsContent value="home" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
-                        <HomeOverview user={user} household={household} currencySymbol={currencySymbol} hideBalances={hideBalances} />
+                        <HomeOverview
+                            user={user}
+                            household={household}
+                            currencySymbol={currencySymbol}
+                            hideBalances={hideBalances}
+                            refreshTrigger={refreshKey} // PASSED HERE
+                        />
                     </TabsContent>
 
                     <TabsContent value="wishlist" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
-                        <ListManager user={user} household={household} listType="wishlist" onListSelected={setIsListDetailActive} currencySymbol={currencySymbol} refreshTrigger={refreshKey} />
+                        <ListManager
+                            user={user}
+                            household={household}
+                            listType="wishlist"
+                            onListSelected={setIsListDetailActive}
+                            currencySymbol={currencySymbol}
+                            refreshTrigger={refreshKey} // PASSED HERE
+                        />
                     </TabsContent>
 
                     <TabsContent value="shopping" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
-                        <ListManager user={user} household={household} listType="shopping" onListSelected={setIsListDetailActive} currencySymbol={currencySymbol} refreshTrigger={refreshKey} />
+                        <ListManager
+                            user={user}
+                            household={household}
+                            listType="shopping"
+                            onListSelected={setIsListDetailActive}
+                            currencySymbol={currencySymbol}
+                            refreshTrigger={refreshKey} // PASSED HERE
+                        />
                     </TabsContent>
 
                     <TabsContent value="finance" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
-                        <Finance user={user} household={household} currencySymbol={currencySymbol} hideBalances={hideBalances} />
+                        <Finance
+                            user={user}
+                            household={household}
+                            currencySymbol={currencySymbol}
+                            hideBalances={hideBalances}
+                            refreshTrigger={refreshKey} // PASSED HERE
+                        />
                     </TabsContent>
 
                     <TabsContent value="settings" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
@@ -368,7 +447,15 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
                 {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={handleOnboardingComplete} />}
 
-                <ContextualCreateDialog isOpen={isFabOpen} onOpenChange={setIsFabOpen} context={activeTab} user={user} household={household} onSuccess={handleGlobalRefresh} currencySymbol={currencySymbol} />
+                <ContextualCreateDialog
+                    isOpen={isFabOpen}
+                    onOpenChange={setIsFabOpen}
+                    context={activeTab}
+                    user={user}
+                    household={household}
+                    onSuccess={handleGlobalRefresh} // TRIGGERS REFRESH
+                    currencySymbol={currencySymbol}
+                />
 
                 <HouseholdSyncDialog
                     isOpen={isSyncOpen}

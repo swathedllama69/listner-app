@@ -1,32 +1,28 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { create, getNumericDate } from 'https://deno.land/x/djwt@v2.9.1/mod.ts'
 
-// 1. CORS HEADERS (Allow access from your website)
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-// 2. HELPER: Robust Token Generation (Fixes Base64 & Google Lib Errors)
+// --- HELPER: GOOGLE AUTH FOR FCM ---
 async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string; privateKey: string }) {
   try {
-    // CLEANER: Removes headers, newlines, spaces, AND accidental quotes
     const cleanKey = privateKey
       .replace(/-----BEGIN PRIVATE KEY-----/g, '')
       .replace(/-----END PRIVATE KEY-----/g, '')
-      .replace(/\\n/g, '')  // Remove literal \n
-      .replace(/"/g, '')    // Remove accidental quotes
-      .replace(/\s+/g, ''); // Remove all whitespace
+      .replace(/\\n/g, '')
+      .replace(/"/g, '')
+      .replace(/\s+/g, '');
 
-    // Decode Base64
     const binaryDerString = atob(cleanKey);
     const binaryDer = new Uint8Array(binaryDerString.length);
     for (let i = 0; i < binaryDerString.length; i++) {
       binaryDer[i] = binaryDerString.charCodeAt(i);
     }
 
-    // Import Key
     const cryptoKey = await crypto.subtle.importKey(
       "pkcs8",
       binaryDer,
@@ -35,7 +31,6 @@ async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string
       ["sign"],
     );
 
-    // Sign JWT
     const jwt = await create(
       { alg: 'RS256', typ: 'JWT' },
       {
@@ -48,7 +43,6 @@ async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string
       cryptoKey
     )
 
-    // Exchange for Access Token
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -62,19 +56,17 @@ async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string
     return data.access_token
 
   } catch (err: any) {
-    console.error("Token Gen Error:", err.message)
     throw new Error(`Key Error: ${err.message}`)
   }
 }
 
+// --- MAIN ADMIN FUNCTION ---
 Deno.serve(async (req) => {
-  // 3. HANDLE CORS PREFLIGHT
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // 4. INITIALIZATION
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const projectId = Deno.env.get('FCM_PROJECT_ID')!
@@ -83,7 +75,9 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // 5. SECURITY: Auth Check
+    // 1. VERIFY ADMIN AUTH
+    // This function is NOT triggered by a database webhook. 
+    // It is triggered by a User/Admin making a request, so we check headers.
     const authHeader = req.headers.get('Authorization')
     if (!authHeader) throw new Error("Missing Auth Header")
 
@@ -92,24 +86,57 @@ Deno.serve(async (req) => {
 
     if (error || !user) throw new Error("Unauthorized")
 
-    // 6. SECURITY: Admin Check
-    const { data: adminRecord } = await supabase.from('admins').select('role').eq('id', user.id).single()
-    if (!adminRecord) throw new Error("Forbidden: Not an Admin")
+    // Check if the user is actually an admin
+    const { data: adminRecord } = await supabase
+      .from('admins')
+      .select('role')
+      .eq('id', user.id)
+      .single()
 
-    // 7. PREPARE PAYLOAD
+    if (!adminRecord) throw new Error("Forbidden: You are not an Admin")
+
+    // 2. Parse Message Content
     const { title, body } = await req.json()
+
+    // 3. Get All Device Tokens (Broadcast Mode)
+    // You can filter this if you want to target specific segments later
     const { data: tokens } = await supabase.from('device_tokens').select('token')
 
     if (!tokens?.length) {
-      return new Response(JSON.stringify({ sent: 0, message: "No devices" }), {
+      return new Response(JSON.stringify({ sent: 0, message: "No devices found in database" }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
-    // 8. SEND TO FIREBASE
+    console.log(`🚀 Admin Broadcast: Sending to ${tokens.length} devices...`)
+
+    // 4. Send to FCM
     const accessToken = await getAccessToken({ clientEmail, privateKey })
 
     const promises = tokens.map(t => {
+      // 💡 FIX APPLIED: Removed Flutter garbage, added Android Icon/Color
+      const notificationPayload = {
+        message: {
+          token: t.token,
+          notification: {
+            title: title || "Announcement",
+            body: body || "New update available"
+          },
+          data: {
+            type: 'admin_broadcast',
+            // Removed: click_action: "FLUTTER_NOTIFICATION_CLICK" (Not for Capacitor)
+          },
+          android: {
+            notification: {
+              channel_id: "PushNotifications",
+              icon: "push_icon", // Must match res/drawable/push_icon.png
+              color: "#0D9488",  // Teal-600
+              click_action: "MAIN_ACTIVITY" // Standard Android intent
+            }
+          }
+        }
+      };
+
       return fetch(
         `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
         {
@@ -118,34 +145,19 @@ Deno.serve(async (req) => {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            message: {
-              token: t.token,
-              notification: { title, body },
-              data: {
-                type: 'admin_broadcast',
-                click_action: "FLUTTER_NOTIFICATION_CLICK"
-              },
-              // 💡 FIX: Channel ID for Android 8+ Delivery
-              android: {
-                notification: {
-                  channel_id: "PushNotifications",
-                  icon: "ic_launcher_foreground" // Or "push_icon" if configured
-                }
-              }
-            },
-          }),
+          body: JSON.stringify(notificationPayload),
         }
       )
     })
 
-    await Promise.all(promises)
+    const results = await Promise.all(promises)
 
-    return new Response(JSON.stringify({ success: true, sent: promises.length }), {
+    return new Response(JSON.stringify({ success: true, sent: results.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
 
   } catch (err: any) {
+    console.error("Broadcast Error:", err.message)
     return new Response(JSON.stringify({ error: err.message }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }

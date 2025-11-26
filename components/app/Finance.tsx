@@ -35,7 +35,7 @@ function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: 
     )
 }
 
-export function Finance({ user, household, currencySymbol, hideBalances }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean }) {
+export function Finance({ user, household, currencySymbol, hideBalances, refreshTrigger }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number }) {
     const [members, setMembers] = useState<HouseholdMember[]>([])
     const [expenses, setExpenses] = useState<Expense[]>([])
     const [credits, setCredits] = useState<Credit[]>([])
@@ -67,7 +67,7 @@ export function Finance({ user, household, currencySymbol, hideBalances }: { use
             }).subscribe()
 
         return () => { supabase.removeChannel(expenseChannel); supabase.removeChannel(creditChannel) }
-    }, [household.id, user]);
+    }, [household.id, user, refreshTrigger]); // Added refreshTrigger
 
     const downloadCSV = (content: string, filename: string) => {
         const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });

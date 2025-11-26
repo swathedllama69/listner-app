@@ -1,32 +1,28 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { create, getNumericDate } from 'https://deno.land/x/djwt@v2.9.1/mod.ts'
 
-// 1. CORS HEADERS
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-// 2. HELPER: Robust Token Generation (The Fix)
+// --- HELPER: GOOGLE AUTH FOR FCM ---
 async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string; privateKey: string }) {
   try {
-    // CLEANER: Removes headers, newlines, spaces, AND accidental quotes
     const cleanKey = privateKey
       .replace(/-----BEGIN PRIVATE KEY-----/g, '')
       .replace(/-----END PRIVATE KEY-----/g, '')
-      .replace(/\\n/g, '')  // Remove literal \n
-      .replace(/"/g, '')    // Remove accidental quotes
-      .replace(/\s+/g, ''); // Remove all whitespace
+      .replace(/\\n/g, '')
+      .replace(/"/g, '')
+      .replace(/\s+/g, '');
 
-    // Decode Base64
     const binaryDerString = atob(cleanKey);
     const binaryDer = new Uint8Array(binaryDerString.length);
     for (let i = 0; i < binaryDerString.length; i++) {
       binaryDer[i] = binaryDerString.charCodeAt(i);
     }
 
-    // Import Key
     const cryptoKey = await crypto.subtle.importKey(
       "pkcs8",
       binaryDer,
@@ -35,7 +31,6 @@ async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string
       ["sign"],
     );
 
-    // Sign JWT
     const jwt = await create(
       { alg: 'RS256', typ: 'JWT' },
       {
@@ -48,7 +43,6 @@ async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string
       cryptoKey
     )
 
-    // Exchange for Access Token
     const response = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -62,19 +56,43 @@ async function getAccessToken({ clientEmail, privateKey }: { clientEmail: string
     return data.access_token
 
   } catch (err: any) {
-    console.error("Token Gen Error:", err.message)
     throw new Error(`Key Error: ${err.message}`)
   }
 }
 
+// --- HELPER: RESOLVE HOUSEHOLD ID ---
+// Some tables (like items) might be inside a list, so we need to fetch the parent to find the household.
+async function resolveHouseholdId(supabase: any, table: string, record: any): Promise<string | null> {
+  // 1. Direct check: If the record has household_id, use it.
+  if (record.household_id) return record.household_id;
+
+  // 2. Shopping Items: Fetch parent List
+  if (table === 'shopping_items' && record.list_id) {
+    const { data } = await supabase.from('lists').select('household_id').eq('id', record.list_id).single();
+    return data?.household_id || null;
+  }
+
+  // 3. Wishlist Items (Goals): Fetch parent Wishlist (assuming table is 'wishlists' or 'lists')
+  if (table === 'wishlist_items' && (record.wishlist_id || record.list_id)) {
+    const parentId = record.wishlist_id || record.list_id;
+    // Try 'wishlists' table first, fall back to 'lists' if your schema uses that
+    let { data } = await supabase.from('wishlists').select('household_id').eq('id', parentId).single();
+    if (!data) {
+      ({ data } = await supabase.from('lists').select('household_id').eq('id', parentId).single());
+    }
+    return data?.household_id || null;
+  }
+
+  return null;
+}
+
+// --- MAIN FUNCTION ---
 Deno.serve(async (req) => {
-  // 3. HANDLE PREFLIGHT
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // 4. INIT VARIABLES
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const projectId = Deno.env.get('FCM_PROJECT_ID')!
@@ -83,73 +101,126 @@ Deno.serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey)
 
-    // 5. PARSE WEBHOOK PAYLOAD
+    // 1. Parse Payload
     const payload = await req.json()
-    const { record, type, table } = payload
+    const { type, table, record } = payload
 
-    // Only trigger on new items (INSERT)
+    console.log(`🔔 Webhook: ${type} on ${table}`)
+
     if (type !== 'INSERT') {
-      return new Response('Skipped: Not an INSERT', { status: 200, headers: corsHeaders })
+      return new Response(JSON.stringify({ message: 'Ignored: Not an INSERT' }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
     }
 
-    console.log(`🔔 Event: New ${table} item. Finding household members...`)
+    // 2. Define Message Content based on Table
+    let title = "ListNer Update"
+    let body = "New activity in your household"
+    let householdId = null;
 
-    // 6. LOGIC: Find Household Members (Exclude Sender)
-    // We need to find everyone in the same household EXCEPT the person who created the item
-    const { data: members } = await supabase
+    switch (table) {
+      case 'expenses':
+        title = "💸 New Expense Added";
+        body = `Amount: ${record.amount} - ${record.description || 'No desc'}`;
+        break;
+
+      case 'lists':
+        title = "📝 New List Created";
+        body = `List: "${record.name}" was added.`;
+        break;
+
+      case 'shopping_items':
+        title = "🛒 New Shopping Item";
+        body = `${record.name || 'Item'} was added to the list.`;
+        break;
+
+      case 'wishlist_items':
+        title = "🌟 New Goal Added";
+        body = `${record.name || 'Goal'} was added to the wishlist.`;
+        break;
+
+      case 'credits':
+        title = "💰 New Debt/Credit";
+        body = `A new record of ${record.amount} was added.`;
+        break;
+
+      case 'household_members':
+        title = "👋 New Member Joined";
+        body = "Someone new just joined your household!";
+        break;
+
+      default:
+        console.log(`Unknown table: ${table}`);
+        break;
+    }
+
+    // 3. Resolve the Household ID
+    householdId = await resolveHouseholdId(supabase, table, record);
+
+    if (!householdId) {
+      return new Response(JSON.stringify({ message: "Could not find household_id for this record" }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
+    }
+
+    // 4. Find Users to Notify (Exclude the Creator)
+    // Most tables have 'created_by' or 'user_id'. specific logic for members.
+    let excludeUserId = record.created_by || record.user_id;
+
+    const { data: members, error: memberError } = await supabase
       .from('household_members')
       .select('user_id')
-      .eq('household_id', record.household_id)
-      .neq('user_id', record.user_id)
+      .eq('household_id', householdId)
+      .neq('user_id', excludeUserId) // Don't notify the person who did the action
 
-    if (!members || members.length === 0) {
-      return new Response('No other members to notify.', { status: 200, headers: corsHeaders })
+    if (memberError || !members || members.length === 0) {
+      return new Response(JSON.stringify({ message: "No other members to notify" }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
     }
 
-    const userIds = members.map((m) => m.user_id)
+    const userIdsToNotify = members.map(m => m.user_id);
 
-    // 7. GET TOKENS
+    // 5. Get Device Tokens
     const { data: tokens } = await supabase
       .from('device_tokens')
       .select('token')
-      .in('user_id', userIds)
+      .in('user_id', userIdsToNotify)
 
-    if (!tokens || tokens.length === 0) {
-      return new Response('No device tokens found for members.', { status: 200, headers: corsHeaders })
+    if (!tokens?.length) {
+      return new Response(JSON.stringify({ message: "No devices found" }), {
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      })
     }
 
-    // 8. PREPARE MESSAGE
+    console.log(`🚀 Sending to ${tokens.length} devices...`)
+
+    // 6. Send to FCM
     const accessToken = await getAccessToken({ clientEmail, privateKey })
 
-    let title = 'Household Update'
-    let body = 'Something new happened.'
+    const promises = tokens.map(t => {
+      const fcmPayload = {
+        message: {
+          token: t.token,
+          notification: {
+            title: title,
+            body: body
+          },
+          data: {
+            entity_id: String(record.id),
+            entity_type: table
+          },
+          android: {
+            notification: {
+              channel_id: "PushNotifications",
+              icon: "push_icon",
+              color: "#0D9488",
+              click_action: "MAIN_ACTIVITY"
+            }
+          }
+        }
+      };
 
-    // Custom Messages
-    switch (table) {
-      case 'expenses':
-        title = 'New Expense 💸'
-        body = `${record.name}: ${record.amount}`
-        break;
-      case 'lists':
-        title = 'New List 📝'
-        body = `Created: "${record.name}"`
-        break;
-      case 'shopping_items':
-        title = 'Shopping List 🛒'
-        body = `Added: ${record.name}`
-        break;
-      case 'wishlist_items':
-        title = 'New Goal 🎯'
-        body = `Goal added: "${record.name}"`
-        break;
-      case 'credits':
-        title = 'Debt Added 🤝'
-        body = `Amount: ${record.amount}`
-        break;
-    }
-
-    // 9. SEND TO FIREBASE
-    const promises = tokens.map((t) => {
       return fetch(
         `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
         {
@@ -158,37 +229,19 @@ Deno.serve(async (req) => {
             'Authorization': `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            message: {
-              token: t.token,
-              notification: { title, body },
-              data: {
-                type: table,
-                id: String(record.id),
-                click_action: "FLUTTER_NOTIFICATION_CLICK"
-              },
-              // 💡 Channel ID for Android
-              android: {
-                notification: {
-                  channel_id: "PushNotifications",
-                  icon: "ic_launcher_foreground"
-                }
-              }
-            },
-          }),
+          body: JSON.stringify(fcmPayload),
         }
       )
     })
 
-    await Promise.all(promises)
-    console.log(`✅ Sent ${promises.length} notifications.`)
+    const results = await Promise.all(promises)
 
-    return new Response(JSON.stringify({ success: true, sent: promises.length }), {
+    return new Response(JSON.stringify({ success: true, sent: results.length }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
 
   } catch (err: any) {
-    console.error("❌ Function Error:", err)
+    console.error("Function Error:", err)
     return new Response(JSON.stringify({ error: err.message }), {
       status: 400,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import { supabase, saveDeviceTokenToDB } from '@/lib/supabase'; // Added saveDeviceTokenToDB
+import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
 import { Dashboard } from '@/components/app/Dashboard';
 import { OnboardingScreen } from '@/components/app/OnboardingScreen';
@@ -19,7 +19,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { PushNotifications } from '@capacitor/push-notifications'; // Added Import
 
 /* eslint-disable @next/next/no-img-element */
 
@@ -42,79 +41,47 @@ function AuthWrapper() {
   const listenersInitialized = useRef(false);
   const processedUrls = useRef<Set<string>>(new Set());
 
-  // --- 💡 PUSH NOTIFICATION SETUP ---
-  const setupPushNotifications = async (currentUser: User) => {
-    if (!Capacitor.isNativePlatform()) return;
-
-    console.log("🔔 Initializing Push Notifications...");
-
-    // 1. Request Permission
-    let permStatus = await PushNotifications.checkPermissions();
-    if (permStatus.receive !== 'granted') {
-      permStatus = await PushNotifications.requestPermissions();
-    }
-
-    if (permStatus.receive !== 'granted') {
-      console.warn("🚫 Push permission denied");
-      return;
-    }
-
-    // 2. Register
-    await PushNotifications.register();
-
-    // 3. Add Listeners (Only once)
-    // Remove old listeners to prevent duplicates if re-initializing
-    await PushNotifications.removeAllListeners();
-
-    PushNotifications.addListener('registration', async (token) => {
-      console.log('📲 Push Registration Token:', token.value);
-      await saveDeviceTokenToDB(currentUser.id, token.value, 'android');
-    });
-
-    PushNotifications.addListener('registrationError', (error) => {
-      console.error('❌ Push Registration Error:', error);
-    });
-
-    PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('🔔 Push Received:', notification);
-    });
-
-    PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-      console.log('👉 Push Action:', action);
-    });
-  };
-
   // --- 1. CORE DATA FETCHING ---
   const loadUserData = async (currentUser: User) => {
     try {
       setDebugMsg("Loading Profile...");
 
-      // 💡 TRIGGER PUSH SETUP HERE
-      setupPushNotifications(currentUser);
-
-      let username = currentUser.email?.split('@')[0] || 'user';
-      if (username.length < 3) username = username + '_user';
-
-      const { data: profile, error: profileError } = await supabase
+      // ⚡ OPTIMIZATION: Try to Read First (Fast)
+      let { data: profile, error: profileError } = await supabase
         .from('profiles')
-        .upsert({
-          id: currentUser.id,
-          email: currentUser.email,
-          username: username,
-        }, { onConflict: 'id' })
         .select('*')
+        .eq('id', currentUser.id)
         .single();
 
-      if (profileError) throw new Error(`Profile Load Failed: ${profileError.message}`);
+      // Only Write if Profile is Missing (Slow)
+      if (!profile) {
+        let username = currentUser.email?.split('@')[0] || 'user';
+        if (username.length < 3) username = username + '_user';
+
+        const { data: newProfile, error: createError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: currentUser.id,
+            email: currentUser.email,
+            username: username,
+          }, { onConflict: 'id' })
+          .select('*')
+          .single();
+
+        if (createError) throw createError;
+        profile = newProfile;
+      }
 
       setDebugMsg("Loading Household...");
 
       let currentHousehold: Household | null = null;
-      const { data: memberData } = await supabase
+      const { data: memberData, error: memberError } = await supabase
         .from("household_members")
         .select("households(*)")
         .eq("user_id", currentUser.id)
         .maybeSingle();
+
+      if (memberError) console.error("❌ Household Member Error:", memberError);
 
       if (memberData && memberData.households) {
         currentHousehold = Array.isArray(memberData.households) ? memberData.households[0] as Household : memberData.households as Household;
@@ -135,32 +102,25 @@ function AuthWrapper() {
       }
 
     } catch (err: any) {
-      console.error("Load Error:", err);
-      setErrorDetails(err.message);
+      console.error("💥 CRITICAL LOAD ERROR:", JSON.stringify(err));
+      setErrorDetails(err.message || JSON.stringify(err) || "Unknown error loading user data.");
       setStage('ERROR');
     }
   };
 
-  // ... (Rest of the existing Deep Link and Effect logic remains the same)
-
-  // For brevity, assuming the handleDeepLink, useEffects, handleTutorialComplete are preserved from previous version.
-  // Just ensure loadUserData is updated as above.
-
-  // ---------------------------------------------------------------------------
-  // COPY/PASTE THE REST OF YOUR PREVIOUS 'app/page.tsx' LOGIC HERE IF NEEDED
-  // OR JUST USE THE `loadUserData` UPDATE ABOVE IN YOUR EXISTING FILE.
-  // ---------------------------------------------------------------------------
-
+  // --- 2. DEEP LINK HANDLER ---
   const handleDeepLink = async (url: string) => {
     if (processedUrls.current.has(url)) return;
     processedUrls.current.add(url);
 
+    console.log("🔗 Deep Link Detected:", url);
     setStage('LOADING');
     setDebugMsg("Processing Login...");
 
     try {
       const { data: existing } = await supabase.auth.getSession();
       if (existing.session?.user) {
+        console.log("✅ Already logged in, skipping exchange.");
         await loadUserData(existing.session.user);
         return;
       }
@@ -188,12 +148,13 @@ function AuthWrapper() {
         }
       }
     } catch (e: any) {
-      console.error("Deep Link Error:", e);
+      console.error("❌ Deep Link Failed:", e);
       setErrorDetails(e.message);
       setStage('ERROR');
     }
   };
 
+  // --- 3. INITIALIZATION EFFECTS ---
   useEffect(() => {
     if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
       listenersInitialized.current = true;
@@ -226,19 +187,20 @@ function AuthWrapper() {
       }
     });
 
+    // 💡 FIX: Increased timeout to 60 seconds for slow Google redirects
     const timeout = setTimeout(() => {
       if (stage === 'LOADING') {
         console.warn("⚠️ App stuck on loading. Resetting...");
         setStage('AUTH');
       }
-    }, 10000);
+    }, 60000);
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
       clearTimeout(timeout);
     };
-  }, []);
+  }, [stage]);
 
   const handleTutorialComplete = async () => {
     if (!user) return;
@@ -261,7 +223,7 @@ function AuthWrapper() {
     case 'ERROR': return (
       <div className={`flex flex-col items-center justify-center bg-slate-50 p-6 text-center ${safeAreaWrapper}`}>
         <div className="bg-rose-100 p-4 rounded-full mb-4"><AlertTriangle className="w-8 h-8 text-rose-600" /></div>
-        <h2 className="text-xl font-bold text-slate-900 mb-2">Issue</h2>
+        <h2 className="text-xl font-bold text-slate-900 mb-2">Login Issue</h2>
         <p className="text-sm text-slate-500 mb-6">We couldn't load your profile.</p>
         <div className="bg-slate-100 p-3 rounded-lg text-xs font-mono text-slate-600 mb-6 max-w-full break-all border border-slate-200">{errorDetails}</div>
         <div className="flex gap-3 w-full max-w-xs">
@@ -279,10 +241,8 @@ function AuthWrapper() {
   }
 }
 
+// --- AUTH PAGE ---
 function AuthPage() {
-  // ... (AuthPage code remains EXACTLY the same as Version 5.0)
-  // You can copy it from the previous successful file if you prefer, or I can paste it again.
-  // For brevity, I am assuming you keep the AuthPage component from the previous step.
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -294,11 +254,12 @@ function AuthPage() {
 
   const features = [
     { title: "The Best List App", desc: "Say goodbye to old spreadsheets. ListNer is the new command center for your household.", icon: ListChecks, color: "bg-teal-600" },
-    { title: "Sync Your Home", desc: "Coordinate all lists, tasks, and goals in real-time with family or partners.", icon: Users, color: "bg-teal-500" },
+    { title: "Sync Your Home", desc: "Coordinate all lists, tasks, and goals in real-time with buddy or partners.", icon: Users, color: "bg-teal-500" },
     { title: "One-Stop Finance", desc: "Easily track shared expenses and automate IOU calculations instantly.", icon: Wallet, color: "bg-emerald-500" },
     { title: "Fully Secured", desc: "Your financial and household data is protected with enterprise-grade encryption.", icon: ShieldCheck, color: "bg-indigo-500" },
   ];
 
+  // 💡 RESTORED ANIMATION ITEMS
   const animationItems = [
     { type: '🍎', size: 10, duration: 18, delay: 0, top: '10%', left: '10%', animKey: 'slowDrift1', isEmoji: true, opacity: 0.25 },
     { type: '💵', size: 14, duration: 18, delay: 10, bottom: '10%', left: '40%', animKey: 'slowDrift3', isEmoji: true, opacity: 0.15 },
@@ -312,9 +273,6 @@ function AuthPage() {
     { type: '💻', size: 16, duration: 19, delay: 70, top: '30%', right: '10%', animKey: 'slowDrift15', isEmoji: true, opacity: 0.15 },
     { Icon: ShoppingCart, color: 'text-lime-400', size: 10, duration: 20, delay: 20, bottom: '25%', right: '15%', animKey: 'slowDrift5', isEmoji: false, opacity: 0.2 },
     { Icon: Wallet, color: 'text-teal-400', size: 12, duration: 18, delay: 25, top: '70%', left: '20%', animKey: 'slowDrift6', isEmoji: false, opacity: 0.25 },
-    { type: '🍕', size: 11, duration: 21, delay: 2, top: '15%', right: '40%', animKey: 'slowDrift7', isEmoji: true, opacity: 0.2 },
-    { type: '🥕', size: 9, duration: 19, delay: 8, bottom: '30%', left: '20%', animKey: 'slowDrift8', isEmoji: true, opacity: 0.15 },
-    { type: '🏡', size: 13, duration: 24, delay: 12, top: '80%', left: '10%', animKey: 'slowDrift9', isEmoji: true, opacity: 0.25 },
   ];
 
   useEffect(() => {
@@ -381,9 +339,6 @@ function AuthPage() {
   return (
     <div className="relative flex-1 flex overflow-hidden bg-slate-50">
       <style jsx global>{`
-        @keyframes blob { 0%, 100% { transform: translate(0, 0) scale(1); } 25% { transform: translate(-200px, 150px) scale(1.1); } 50% { transform: translate(250px, -150px) scale(0.9); } 75% { transform: translate(-150px, -100px) scale(1.2); } }
-        .animation-delay-2000 { animation-delay: 2s; }
-        .animation-delay-4000 { animation-delay: 4s; }
         @keyframes slowDrift1 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 33% { transform: translate(10vw, 20vh) rotate(10deg); } 66% { transform: translate(-15vw, 5vh) rotate(-5deg); } }
         @keyframes slowDrift2 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(-10vw, -10vh) rotate(-10deg); } 80% { transform: translate(10vw, 15vh) rotate(5deg); } }
         @keyframes slowDrift3 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 20% { transform: translate(25vw, -5vh) rotate(15deg); } 70% { transform: translate(-5vw, 25vh) rotate(-15deg); } }
@@ -401,11 +356,10 @@ function AuthPage() {
         @keyframes slowDrift15 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 35% { transform: translate(-15vw, 10vh) rotate(-10deg); } }
       `}</style>
       <div className="absolute inset-0 z-0">
-        <div className="absolute top-[-20%] left-[-20%] w-[800px] h-[800px] bg-teal-300 rounded-full mix-blend-multiply filter blur-[100px] opacity-10 animate-blob"></div>
-        <div className="absolute top-[20%] right-[-20%] w-[600px] h-[600px] bg-emerald-300 rounded-full mix-blend-multiply filter blur-[100px] opacity-10 animate-blob animation-delay-2000"></div>
-        <div className="absolute bottom-[-20%] left-[20%] w-[700px] h-[700px] bg-lime-300 rounded-full mix-blend-multiply filter blur-[100px] opacity-10 animate-blob animation-delay-4000"></div>
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-5"></div>
+        {/* ⚡ OPTIMIZATION: Static gradient background instead of heavy blurs */}
+        <div className="absolute inset-0 bg-gradient-to-br from-teal-50 via-white to-indigo-50 opacity-80"></div>
 
+        {/* ⚡ RESTORED: Floating items (lightweight) */}
         {animationItems.map((item, index) => {
           const sizeInPixels = item.size * (item.isEmoji ? 6 : 4.5);
           const IconComponent = item.Icon;
@@ -449,7 +403,7 @@ function AuthPage() {
                 {authMethod === 'forgot_password' ? "Reset Password" : activeTab === 'signup' ? "Let's Get Started!" : "Welcome Back"}
               </CardTitle>
               <CardDescription>
-                {authMethod === 'forgot_password' ? "Enter your email to recover access." : activeTab === 'signup' ? "Create your account and sync up your home life." : "Sign in to access your shared space"}
+                {authMethod === 'forgot_password' ? "Enter your email to recover access." : activeTab === 'signup' ? "Create your ListNer account" : "Sign in to access your ListNer"}
               </CardDescription>
             </CardHeader>
             <CardContent className="px-8 pb-8">
