@@ -122,6 +122,7 @@ Deno.serve(async (req) => {
           },
           data: {
             type: 'admin_broadcast',
+
             // Pass the optional link in the data payload
             ...(link && { link }),
           },
