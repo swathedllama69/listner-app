@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank } from "lucide-react"
+import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, ChevronLeft } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SidebarLayout } from "@/components/ui/SidebarLayout"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -19,7 +19,6 @@ import { getCurrencySymbol, EXPENSE_CATEGORIES } from "@/lib/constants"
 import { Separator } from "@/components/ui/separator"
 import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
-import { App } from '@capacitor/app'; // Re-imported App for stability fix
 
 // Import sibling components
 import { ListDetail } from "@/components/app/ListDetail"
@@ -158,7 +157,16 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     if (selectedList) {
         return (
             <div className="w-full animate-in slide-in-from-right-4 fade-in duration-300">
-                <Button variant="ghost" onClick={handleBack} className="mb-4 text-slate-500 hover:text-slate-800 pl-0 h-auto gap-1 text-base"><span className="text-lg">←</span> Back to Lists</Button>
+                {/* FIX: Fancy Back Button */}
+                <Button
+                    variant="outline"
+                    onClick={handleBack}
+                    className="mb-4 pl-3 pr-4 h-10 rounded-full border-slate-200 text-slate-600 hover:text-slate-900 hover:border-slate-300 hover:bg-slate-50 shadow-sm flex items-center gap-2 transition-all"
+                >
+                    <div className="bg-slate-100 rounded-full p-1"><ChevronLeft className="w-4 h-4" /></div>
+                    <span className="font-bold">Back to Lists</span>
+                </Button>
+
                 {listType === 'wishlist' ? <ListDetail user={user} list={selectedList} currencySymbol={currencySymbol} /> : <ShoppingList user={user} list={selectedList} currencySymbol={currencySymbol} />}
             </div>
         )
@@ -244,61 +252,24 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const [isListDetailActive, setIsListDetailActive] = useState(false);
     const [showOnboarding, setShowOnboarding] = useState(false);
     const [isSyncOpen, setIsSyncOpen] = useState(false);
-
-    // --- REFRESH STATE ---
     const [refreshKey, setRefreshKey] = useState(0);
-
     const [hideBalances, setHideBalances] = useState(false);
-
     const currencySymbol = getCurrencySymbol(household.currency || 'NGN');
 
-    // --- ⚡ PUSH NOTIFICATION INIT ---
     useEffect(() => {
         if (Capacitor.isNativePlatform()) {
-            console.log("🔔 Initializing Push Notifications...");
-
             const initPush = async () => {
                 try {
                     let permStatus = await PushNotifications.checkPermissions();
-                    if (permStatus.receive === 'prompt') {
-                        permStatus = await PushNotifications.requestPermissions();
-                    }
-
-                    if (permStatus.receive !== 'granted') {
-                        console.warn("🚫 Push permission denied or ignored by user.");
-                        return;
-                    }
-
+                    if (permStatus.receive === 'prompt') permStatus = await PushNotifications.requestPermissions();
+                    if (permStatus.receive !== 'granted') return;
                     await PushNotifications.register();
-                } catch (e) {
-                    console.error("⚠️ Push Init Error:", e);
-                }
+                } catch (e) { console.error("Push Init Error", e); }
             }
-
             initPush();
 
-            // Listeners
             PushNotifications.addListener('registration', async (token) => {
-                console.log('📲 Push Registration Token:', token.value);
-                const { error } = await supabase.from('device_tokens').upsert({
-                    user_id: user.id,
-                    token: token.value,
-                }, { onConflict: 'token' });
-
-                if (error) console.error("❌ DB Token Save Error:", error.message);
-                else console.log("✅ Device token saved to DB!");
-            });
-
-            PushNotifications.addListener('registrationError', (error) => {
-                console.error('❌ Push Registration Error: ' + JSON.stringify(error));
-            });
-
-            PushNotifications.addListener('pushNotificationReceived', (notification) => {
-                console.log('🔔 Push Received:', notification);
-            });
-
-            PushNotifications.addListener('pushNotificationActionPerformed', (notification) => {
-                console.log('🔔 Push Action:', notification.actionId, notification.inputValue);
+                await supabase.from('device_tokens').upsert({ user_id: user.id, token: token.value }, { onConflict: 'token' });
             });
         }
     }, [user.id]);
@@ -313,9 +284,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         }
         fetchData();
 
-        if (!user.user_metadata?.onboarding_complete) {
-            setShowOnboarding(true);
-        }
+        if (!user.user_metadata?.onboarding_complete) setShowOnboarding(true);
     }, [household.id, user]);
 
     const togglePrivacy = () => {
@@ -326,29 +295,21 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
     const getPageTitle = (tab: string) => { switch (tab) { case 'home': return 'Dashboard'; case 'wishlist': return 'Wishlists'; case 'shopping': return 'Shopping Lists'; case 'finance': return 'Finance'; case 'settings': return 'Settings'; default: return 'Dashboard'; } }
     const getGreeting = () => { const hour = new Date().getHours(); if (hour < 12) return "Good morning"; if (hour < 18) return "Good afternoon"; return "Good evening"; }
-
     const userName = user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0] || 'there';
     const formattedName = userName.charAt(0).toUpperCase() + userName.slice(1);
     const greeting = `${getGreeting()}, ${formattedName}`;
-
-    // --- GLOBAL REFRESH HANDLER ---
-    const handleGlobalRefresh = () => {
-        setRefreshKey(prev => prev + 1);
-    }
+    const handleGlobalRefresh = () => setRefreshKey(prev => prev + 1);
 
     const handleOnboardingComplete = () => {
         localStorage.setItem(`tutorial_seen_${user.id}`, "true");
         setShowOnboarding(false);
-        if (typeof window !== "undefined") {
-            window.location.reload();
-        }
+        if (typeof window !== "undefined") window.location.reload();
     }
 
     return (
         <SidebarLayout user={user} household={household} memberCount={memberCount} activeTab={activeTab} setActiveTab={setActiveTab}>
             <div className="w-full pb-24 relative">
 
-                {/* --- HEADER with Status Bar Fix (pt-12) --- */}
                 {/* Desktop Header */}
                 <div className="hidden md:flex flex-row items-center justify-between gap-4 mb-6">
                     <div>
@@ -368,10 +329,10 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     </div>
                 </div>
 
-                {/* Mobile Header (Padding Fix Applied) */}
-                <div className="md:hidden mb-3 space-y-3"> {/* REMOVED pt-12 HERE, relied on parent <AuthWrapper> or global CSS instead */}
+                {/* Mobile Header - PADDING FIX */}
+                {/* FIX: Reduced margin to pull content up */}
+                <div className="md:hidden mb-3 space-y-3">
                     <div className="flex justify-between items-center">
-                        {/* FIX: Removed the large padding/indent by adjusting header structure */}
                         <h1 className="text-xl font-bold text-slate-800 tracking-tight">{getPageTitle(activeTab)}</h1>
                         {memberCount < 2 && (
                             <Button onClick={() => setIsSyncOpen(true)} className="bg-violet-600 text-white rounded-full text-xs h-8 px-3 font-bold">
@@ -380,7 +341,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                         )}
                     </div>
 
-                    {/* Greeting remains below the title/button area */}
                     <div className="flex justify-between items-end">
                         <p className="text-sm text-slate-500 font-medium pb-1">{greeting}</p>
                         <div className="flex items-center gap-1">
@@ -396,50 +356,24 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
                 {/* --- CONTENT --- */}
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                    {/* ANIMATION FIX: Removed complex CSS animations (animate-in, slide-in-from-bottom-2, duration-500) causing jank */}
-                    <TabsContent value="home" className="fade-in space-y-6">
-                        <HomeOverview
-                            user={user}
-                            household={household}
-                            currencySymbol={currencySymbol}
-                            hideBalances={hideBalances}
-                            refreshTrigger={refreshKey}
-                        />
+                    {/* FIX: Removed animation classes to fix jank */}
+                    <TabsContent value="home" className="space-y-6">
+                        <HomeOverview user={user} household={household} currencySymbol={currencySymbol} hideBalances={hideBalances} refreshTrigger={refreshKey} />
                     </TabsContent>
 
-                    <TabsContent value="wishlist" className="fade-in space-y-6">
-                        <ListManager
-                            user={user}
-                            household={household}
-                            listType="wishlist"
-                            onListSelected={setIsListDetailActive}
-                            currencySymbol={currencySymbol}
-                            refreshTrigger={refreshKey}
-                        />
+                    <TabsContent value="wishlist" className="space-y-6">
+                        <ListManager user={user} household={household} listType="wishlist" onListSelected={setIsListDetailActive} currencySymbol={currencySymbol} refreshTrigger={refreshKey} />
                     </TabsContent>
 
-                    <TabsContent value="shopping" className="fade-in space-y-6">
-                        <ListManager
-                            user={user}
-                            household={household}
-                            listType="shopping"
-                            onListSelected={setIsListDetailActive}
-                            currencySymbol={currencySymbol}
-                            refreshTrigger={refreshKey}
-                        />
+                    <TabsContent value="shopping" className="space-y-6">
+                        <ListManager user={user} household={household} listType="shopping" onListSelected={setIsListDetailActive} currencySymbol={currencySymbol} refreshTrigger={refreshKey} />
                     </TabsContent>
 
-                    <TabsContent value="finance" className="fade-in space-y-6">
-                        <Finance
-                            user={user}
-                            household={household}
-                            currencySymbol={currencySymbol}
-                            hideBalances={hideBalances}
-                            refreshTrigger={refreshKey}
-                        />
+                    <TabsContent value="finance" className="space-y-6">
+                        <Finance user={user} household={household} currencySymbol={currencySymbol} hideBalances={hideBalances} refreshTrigger={refreshKey} />
                     </TabsContent>
 
-                    <TabsContent value="settings" className="fade-in space-y-6">
+                    <TabsContent value="settings" className="space-y-6">
                         <SettingsView user={user} household={household} />
                     </TabsContent>
                 </Tabs>
@@ -449,24 +383,8 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                 )}
 
                 {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={handleOnboardingComplete} />}
-
-                <ContextualCreateDialog
-                    isOpen={isFabOpen}
-                    onOpenChange={setIsFabOpen}
-                    context={activeTab}
-                    user={user}
-                    household={household}
-                    onSuccess={handleGlobalRefresh}
-                    currencySymbol={currencySymbol}
-                />
-
-                <HouseholdSyncDialog
-                    isOpen={isSyncOpen}
-                    onOpenChange={setIsSyncOpen}
-                    householdId={household.id}
-                    userId={user.id}
-                    onJoinSuccess={() => window.location.reload()}
-                />
+                <ContextualCreateDialog isOpen={isFabOpen} onOpenChange={setIsFabOpen} context={activeTab} user={user} household={household} onSuccess={handleGlobalRefresh} currencySymbol={currencySymbol} />
+                <HouseholdSyncDialog isOpen={isSyncOpen} onOpenChange={setIsSyncOpen} householdId={household.id} userId={user.id} onJoinSuccess={() => window.location.reload()} />
             </div>
         </SidebarLayout>
     )

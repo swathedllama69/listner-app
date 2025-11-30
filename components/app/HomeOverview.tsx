@@ -22,6 +22,22 @@ const CATEGORY_COLORS: { [key: string]: string } = {
     "Other": "#94a3b8"
 };
 
+// Helper: Get background color class for the Progress Bar Indicator
+const getProgressIndicatorColor = (percent: number) => {
+    if (percent >= 100) return "bg-emerald-500";
+    if (percent >= 70) return "bg-emerald-500";
+    if (percent >= 30) return "bg-amber-500";
+    return "bg-rose-500";
+};
+
+// Helper: Get text color class for the Percentage Text
+const getProgressTextColor = (percent: number) => {
+    if (percent >= 100) return "text-emerald-600";
+    if (percent >= 70) return "text-emerald-600";
+    if (percent >= 30) return "text-amber-600";
+    return "text-rose-600";
+};
+
 export function HomeOverview({ user, household, currencySymbol, hideBalances, refreshTrigger }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number }) {
     const [loading, setLoading] = useState(true)
     const [stats, setStats] = useState({
@@ -143,7 +159,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         </CardContent>
                     </Card>
 
-                    {/* CARD 4: GOALS */}
+                    {/* CARD 4: GOALS - UPDATED COLOR LOGIC */}
                     <Card className="rounded-2xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-purple-200">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-1 relative z-10">
                             <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Goals</CardTitle>
@@ -153,21 +169,28 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         </CardHeader>
                         <CardContent className="p-4 pt-1 relative z-10">
                             <div className="flex justify-between items-end mb-1.5">
-                                <div className="text-2xl font-bold text-slate-800 tracking-tight">{Math.round(wishlistProgress)}%</div>
+                                {/* TEXT COLOR UPDATED */}
+                                <div className={`text-2xl font-bold tracking-tight ${getProgressTextColor(wishlistProgress)}`}>
+                                    {Math.round(wishlistProgress)}%
+                                </div>
                                 <span className="text-[10px] text-slate-400 mb-1 font-medium">{formatMoney(stats.wishlistSaved)}</span>
                             </div>
-                            <Progress value={wishlistProgress} className="h-1.5 bg-purple-100" />
+                            {/* BAR COLOR UPDATED - Track is neutral (bg-slate-100), Indicator is colored */}
+                            <Progress
+                                value={wishlistProgress}
+                                className="h-1.5 bg-slate-100"
+                                indicatorClassName={getProgressIndicatorColor(wishlistProgress)}
+                            />
                         </CardContent>
                     </Card>
                 </div>
 
-                {/* CHARTS ROW */}
+                {/* CHARTS */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                     <Card className="rounded-2xl border border-slate-100 p-5 hover:shadow-sm transition-all bg-white">
                         <CardTitle className="text-xs font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-wider">
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> Expense Breakdown
                         </CardTitle>
-                        {/* CHART FIX: Standard container, removed will-change/contain to fix web view */}
                         <div className="w-full">
                             <CategoryDonutChart data={finalCategoryData} currencySymbol={currencySymbol} />
                         </div>
@@ -177,7 +200,6 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         <CardTitle className="text-xs font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-wider">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Spending Trend
                         </CardTitle>
-                        {/* CHART FIX: Standard container, removed will-change/contain to fix web view */}
                         <div className="w-full">
                             <MonthlyTrendChart data={monthlyChartData} currencySymbol={currencySymbol} />
                         </div>

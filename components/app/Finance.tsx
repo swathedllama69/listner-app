@@ -43,7 +43,6 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     useEffect(() => {
         async function fetchFinanceData() {
             const { data: memberData } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
-            // Fix: Correctly map joined profile email or fallback
             if (memberData) {
                 const mappedMembers = memberData.map((m: any) => ({
                     user_id: m.user_id,
@@ -115,10 +114,10 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     return (
         <TooltipProvider>
             <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
-                {/* COLORFUL HEADER */}
-                <div className="sticky top-0 z-10 bg-gradient-to-r from-indigo-600 to-violet-600 text-white px-6 py-4 flex items-center justify-between shadow-md mb-6">
+                {/* THEME UPDATED HEADER: Teal/Emerald Gradient */}
+                <div className="sticky top-0 z-10 bg-gradient-to-r from-teal-600 to-emerald-600 text-white px-6 py-4 flex items-center justify-between shadow-md mb-6">
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">Net Position</span>
+                        <span className="text-[10px] font-bold text-teal-100 uppercase tracking-widest">Net Position</span>
                         {!isBalanced && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
                     </div>
                     <div className="text-3xl font-bold tracking-tight">

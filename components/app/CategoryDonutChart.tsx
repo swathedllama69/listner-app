@@ -5,15 +5,20 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
 
 type CategoryData = { name: string; value: number; color: string };
 
+// Helper for K/M formatting
+const formatCurrencyValue = (val: number, symbol: string) => {
+    if (val >= 1000000) return `${symbol}${(val / 1000000).toFixed(1)}M`;
+    if (val >= 1000) return `${symbol}${(val / 1000).toFixed(1)}k`;
+    return `${symbol}${val.toLocaleString()}`;
+};
+
 export function CategoryDonutChart({ data, currencySymbol }: { data: CategoryData[], currencySymbol?: string }) {
     const symbol = currencySymbol || '₦';
 
-    // Memoize total to prevent recalc on every render
     const totalSpent = useMemo(() => {
         return data.reduce((sum, item) => sum + (Number(item.value) || 0), 0);
     }, [data]);
 
-    // Safety: If no data or 0 total, show empty state immediately
     if (!data || totalSpent === 0) {
         return (
             <div className="flex items-center justify-center w-full h-[250px] bg-slate-50 rounded-xl border border-dashed border-slate-200">
@@ -33,7 +38,7 @@ export function CategoryDonutChart({ data, currencySymbol }: { data: CategoryDat
                         <span className="font-semibold text-slate-700">{item.name}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                        <span className="text-slate-500 font-mono">{symbol}{item.value.toLocaleString()}</span>
+                        <span className="text-slate-500 font-mono">{formatCurrencyValue(item.value, symbol)}</span>
                         <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded text-[10px] font-bold">{percentage}%</span>
                     </div>
                 </div>
@@ -64,18 +69,18 @@ export function CategoryDonutChart({ data, currencySymbol }: { data: CategoryDat
                     </Pie>
                     <Tooltip content={<CustomTooltip />} />
 
-                    {/* Centered Total Text */}
                     <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central">
                         <tspan x="50%" dy="-10" className="text-[10px] font-bold fill-slate-400 uppercase tracking-widest">Total</tspan>
-                        <tspan x="50%" dy="22" className="text-lg font-black fill-slate-800">{symbol}{(totalSpent / 1000).toFixed(1)}k</tspan>
+                        <tspan x="50%" dy="22" className="text-lg font-black fill-slate-800">
+                            {formatCurrencyValue(totalSpent, symbol)}
+                        </tspan>
                     </text>
                 </PieChart>
             </ResponsiveContainer>
 
-            {/* Static Legend below chart */}
-            <div className="flex flex-wrap justify-center gap-2 mt-[-10px] px-2">
+            <div className="flex flex-wrap justify-center gap-2 mt-[-10px] px-2 relative z-10 pointer-events-none">
                 {data.slice(0, 3).map((entry) => (
-                    <div key={entry.name} className="flex items-center gap-1.5 px-2 py-1 bg-white border border-slate-100 rounded-md shadow-sm">
+                    <div key={entry.name} className="flex items-center gap-1.5 px-2 py-1 bg-white/80 backdrop-blur-sm border border-slate-100 rounded-md shadow-sm">
                         <div className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
                         <span className="text-[10px] font-medium text-slate-600 truncate max-w-[80px]">{entry.name}</span>
                     </div>

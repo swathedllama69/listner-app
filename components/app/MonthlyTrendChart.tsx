@@ -5,27 +5,45 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 
 type MonthlyData = { month: string; month_start: string; total: number; };
 
+// Helper for K/M formatting
+const formatAxisValue = (val: number) => {
+    if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+    if (val >= 1000) return `${(val / 1000).toFixed(0)}k`;
+    return val.toString();
+};
+
 export function MonthlyTrendChart({ data, currencySymbol }: { data: MonthlyData[], currencySymbol: string }) {
-    const [filter, setFilter] = useState<'3M' | '6M' | 'YTD' | 'ALL'>('6M');
+    // ADDED '7D' to the filter state
+    const [filter, setFilter] = useState<'7D' | '1M' | '3M' | '6M' | 'YTD' | 'ALL'>('6M');
 
     const chartData = useMemo(() => {
         if (!data || data.length === 0) return [];
 
-        // Sort data chronologically to ensure slicing works correctly
+        // Sort chronologically
         const sortedData = [...data].sort((a, b) => new Date(a.month_start).getTime() - new Date(b.month_start).getTime());
+        const now = new Date();
+
+        // Filter out future data
+        const availableData = sortedData.filter(d => new Date(d.month_start) <= now);
+        const count = availableData.length;
+        const currentYear = now.getFullYear();
 
         switch (filter) {
+            case '7D':
+                // Showing last data point as approximation for 7D on monthly data
+                return availableData.slice(count - 1);
+            case '1M':
+                return availableData.slice(count - 1);
             case '3M':
-                return sortedData.slice(-3);
+                return availableData.slice(count - 3);
             case '6M':
-                return sortedData.slice(-6);
-            case 'YTD': {
-                const currentYear = new Date().getFullYear();
-                return sortedData.filter(d => new Date(d.month_start).getFullYear() === currentYear);
-            }
+                return availableData.slice(count - 6);
+            case 'YTD':
+                return availableData.filter(d => new Date(d.month_start).getFullYear() === currentYear);
             case 'ALL':
+                return availableData;
             default:
-                return sortedData;
+                return availableData.slice(count - 6);
         }
     }, [data, filter]);
 
@@ -53,9 +71,9 @@ export function MonthlyTrendChart({ data, currencySymbol }: { data: MonthlyData[
 
     return (
         <div className="w-full flex flex-col h-[280px]">
-            {/* Filter Bar */}
             <div className="flex justify-end gap-1 mb-2">
-                {(['3M', '6M', 'YTD', 'ALL'] as const).map((key) => (
+                {/* ADDED 7D BUTTON */}
+                {(['7D', '1M', '3M', '6M', 'YTD', 'ALL'] as const).map((key) => (
                     <button
                         key={key}
                         onClick={() => setFilter(key)}
@@ -71,10 +89,9 @@ export function MonthlyTrendChart({ data, currencySymbol }: { data: MonthlyData[
                 ))}
             </div>
 
-            {/* Chart Area */}
             <div className="flex-1 w-full min-h-0">
                 <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
+                    <AreaChart data={chartData} margin={{ top: 5, right: 0, left: -10, bottom: 0 }}>
                         <defs>
                             <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor="#10b981" stopOpacity={0.15} />
@@ -95,7 +112,7 @@ export function MonthlyTrendChart({ data, currencySymbol }: { data: MonthlyData[
                             fontSize={10}
                             tickLine={false}
                             axisLine={false}
-                            tickFormatter={(value) => `${(value / 1000).toFixed(0)}k`}
+                            tickFormatter={formatAxisValue}
                         />
                         <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#cbd5e1', strokeWidth: 1 }} />
                         <Area

@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { List, WishlistItem } from "@/lib/types"
-import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Share2, Settings, CheckCircle2, Globe, Lock, Info, Lightbulb, ListChecks, MoreHorizontal, ChevronDown, ChevronUp } from "lucide-react"
+import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Settings, Globe, Lock, ListChecks, MoreHorizontal, ChevronDown, ChevronUp } from "lucide-react"
 
 const categories = ["Item", "Project", "Vacation", "Other"]
 const priorities = ["High", "Medium", "Low"]
@@ -29,6 +29,14 @@ const getPriorityCardStyle = (p: string) => {
         default: return 'bg-white border-slate-100';
     }
 }
+
+// Helper for Goal Colors (Consistent with HomeOverview)
+const getProgressColor = (percent: number) => {
+    if (percent >= 100) return "bg-emerald-500";
+    if (percent >= 70) return "bg-emerald-400";
+    if (percent >= 30) return "bg-amber-400";
+    return "bg-rose-400";
+};
 
 function PortalFAB({ onClick, className, icon: Icon }: any) {
     const [mounted, setMounted] = useState(false);
@@ -64,8 +72,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [items, setItems] = useState<WishlistItem[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [activeTab, setActiveTab] = useState("All")
-
-    // Pagination State
     const [page, setPage] = useState(1);
     const ITEMS_PER_PAGE = 5;
 
@@ -118,7 +124,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         if (!error) {
             setListSettings(prev => ({ ...prev, name: listNameForm }));
             setIsRenameOpen(false);
-            // No reload here to prevent app refresh
         }
     }
 
@@ -179,6 +184,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     }
 
     const toggleComplete = async (item: WishlistItem) => {
+        // FIX: Simplified logic to allow reversal
         const { error } = await supabase.from("wishlist_items").update({ is_complete: !item.is_complete }).eq("id", item.id)
         if (!error) setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !i.is_complete } : i))
     }
@@ -228,7 +234,12 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                                             <h3 className={`font-bold text-base truncate ${isHigh ? 'text-rose-800' : 'text-slate-800'}`}>{item.name}</h3>
                                             <span className="text-xs font-bold text-slate-600">{Math.round(progress)}%</span>
                                         </div>
-                                        <Progress value={progress} className={`h-1.5 ${isHigh ? 'bg-rose-200' : 'bg-slate-200'}`} />
+                                        {/* UPDATED: Color-coded individual progress bar */}
+                                        <Progress
+                                            value={progress}
+                                            className="h-1.5 bg-slate-100"
+                                            indicatorClassName={getProgressColor(progress)}
+                                        />
                                     </div>
                                     <div className="text-slate-400">{isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
                                 </div>
@@ -265,12 +276,12 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             {completedItems.length > 0 && (
                 <Accordion type="single" collapsible className="bg-slate-50 rounded-xl border border-slate-100 px-4 mt-4">
                     <AccordionItem value="completed" className="border-none">
-                        <AccordionTrigger className="text-slate-500 hover:no-underline text-sm">Completed Goals ({completedItems.length})</AccordionTrigger>
+                        <AccordionTrigger className="text-slate-400 hover:text-slate-600 py-2 text-sm">Completed Goals ({completedItems.length})</AccordionTrigger>
                         <AccordionContent>
                             {completedItems.map(item => (
                                 <div key={item.id} className="flex items-center justify-between p-3 border-b last:border-0 border-slate-200">
                                     <span className="line-through text-slate-400 text-sm">{item.name}</span>
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-3 h-3 text-slate-400" /></Button>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleComplete(item)}><Trash2 className="w-3 h-3 text-slate-400" /></Button>
                                 </div>
                             ))}
                         </AccordionContent>
