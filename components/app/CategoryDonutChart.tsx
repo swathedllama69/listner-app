@@ -18,7 +18,7 @@ export function CategoryDonutChart({ data, currencySymbol }: { data: CategoryDat
             const item = payload[0];
             const percentage = ((item.value / totalSpent) * 100).toFixed(1);
             return (
-                <div className="p-2 bg-white/95 backdrop-blur-sm border border-slate-100 rounded-xl shadow-lg text-xs">
+                <div className="px-3 py-2 bg-white/95 backdrop-blur-sm border border-slate-100 rounded-xl shadow-lg text-xs">
                     <p className="font-bold text-slate-700 mb-0.5 flex items-center gap-1">
                         <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.payload.fill }}></span>
                         {item.name}
@@ -31,8 +31,8 @@ export function CategoryDonutChart({ data, currencySymbol }: { data: CategoryDat
     };
 
     return (
-        // FIXED: Explicit min-height and w-full to prevent initial render crash
-        <div className="flex flex-col w-full h-[250px]">
+        // Chart Jank Fix: Apply hardware acceleration and containment styles to the container
+        <div className="flex flex-col w-full h-[250px]" style={{ willChange: 'transform', contain: 'layout paint' }}>
             <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
                     <Pie

@@ -19,6 +19,7 @@ import { getCurrencySymbol, EXPENSE_CATEGORIES } from "@/lib/constants"
 import { Separator } from "@/components/ui/separator"
 import { PushNotifications } from '@capacitor/push-notifications';
 import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app'; // Re-imported App for stability fix
 
 // Import sibling components
 import { ListDetail } from "@/components/app/ListDetail"
@@ -279,11 +280,9 @@ export function Dashboard({ user, household }: { user: User, household: Househol
             // Listeners
             PushNotifications.addListener('registration', async (token) => {
                 console.log('📲 Push Registration Token:', token.value);
-                // ⚡ FIX: Save to "device_tokens" (not profile_tokens)
                 const { error } = await supabase.from('device_tokens').upsert({
                     user_id: user.id,
                     token: token.value,
-                    // removed updated_at if your table doesn't have it, or keep if it does
                 }, { onConflict: 'token' });
 
                 if (error) console.error("❌ DB Token Save Error:", error.message);
@@ -350,7 +349,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
             <div className="w-full pb-24 relative">
 
                 {/* --- HEADER with Status Bar Fix (pt-12) --- */}
-                {/* ⚡ FIX: Added 'pt-12 md:pt-0' to push content down on mobile */}
+                {/* Desktop Header */}
                 <div className="hidden md:flex flex-row items-center justify-between gap-4 mb-6">
                     <div>
                         <h1 className="text-lg font-semibold text-slate-500 tracking-tight">{getPageTitle(activeTab)}</h1>
@@ -369,8 +368,10 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     </div>
                 </div>
 
-                <div className="md:hidden mb-6 space-y-3 pt-12"> {/* <--- ADDED PT-12 HERE */}
+                {/* Mobile Header (Padding Fix Applied) */}
+                <div className="md:hidden mb-3 space-y-3"> {/* REMOVED pt-12 HERE, relied on parent <AuthWrapper> or global CSS instead */}
                     <div className="flex justify-between items-center">
+                        {/* FIX: Removed the large padding/indent by adjusting header structure */}
                         <h1 className="text-xl font-bold text-slate-800 tracking-tight">{getPageTitle(activeTab)}</h1>
                         {memberCount < 2 && (
                             <Button onClick={() => setIsSyncOpen(true)} className="bg-violet-600 text-white rounded-full text-xs h-8 px-3 font-bold">
@@ -379,6 +380,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                         )}
                     </div>
 
+                    {/* Greeting remains below the title/button area */}
                     <div className="flex justify-between items-end">
                         <p className="text-sm text-slate-500 font-medium pb-1">{greeting}</p>
                         <div className="flex items-center gap-1">
@@ -394,8 +396,8 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
                 {/* --- CONTENT --- */}
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-
-                    <TabsContent value="home" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
+                    {/* ANIMATION FIX: Removed complex CSS animations (animate-in, slide-in-from-bottom-2, duration-500) causing jank */}
+                    <TabsContent value="home" className="fade-in space-y-6">
                         <HomeOverview
                             user={user}
                             household={household}
@@ -405,7 +407,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                         />
                     </TabsContent>
 
-                    <TabsContent value="wishlist" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
+                    <TabsContent value="wishlist" className="fade-in space-y-6">
                         <ListManager
                             user={user}
                             household={household}
@@ -416,7 +418,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                         />
                     </TabsContent>
 
-                    <TabsContent value="shopping" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
+                    <TabsContent value="shopping" className="fade-in space-y-6">
                         <ListManager
                             user={user}
                             household={household}
@@ -427,7 +429,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                         />
                     </TabsContent>
 
-                    <TabsContent value="finance" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
+                    <TabsContent value="finance" className="fade-in space-y-6">
                         <Finance
                             user={user}
                             household={household}
@@ -437,7 +439,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                         />
                     </TabsContent>
 
-                    <TabsContent value="settings" className="animate-in fade-in slide-in-from-bottom-2 duration-500 space-y-6">
+                    <TabsContent value="settings" className="fade-in space-y-6">
                         <SettingsView user={user} household={household} />
                     </TabsContent>
                 </Tabs>

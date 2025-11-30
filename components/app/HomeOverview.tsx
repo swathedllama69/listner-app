@@ -167,7 +167,8 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         <CardTitle className="text-xs font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-wider">
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> Expense Breakdown
                         </CardTitle>
-                        <div className="h-[250px] w-full">
+                        {/* CHART JANK FIX: Applying will-change */}
+                        <div className="h-[250px] w-full" style={{ willChange: 'transform', contain: 'layout paint' }}>
                             <CategoryDonutChart data={finalCategoryData} currencySymbol={currencySymbol} />
                         </div>
                     </Card>
@@ -176,7 +177,8 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         <CardTitle className="text-xs font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-wider">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Spending Trend
                         </CardTitle>
-                        <div className="h-[250px] w-full">
+                        {/* CHART JANK FIX: Applying will-change */}
+                        <div className="h-[250px] w-full" style={{ willChange: 'transform', contain: 'layout paint' }}>
                             <MonthlyTrendChart data={monthlyChartData} currencySymbol={currencySymbol} />
                         </div>
                     </Card>

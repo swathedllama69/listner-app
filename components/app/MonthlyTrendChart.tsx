@@ -6,19 +6,40 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 type MonthlyData = { month: string; month_start: string; total: number; };
 
 export function MonthlyTrendChart({ data, currencySymbol }: { data: MonthlyData[], currencySymbol: string }) {
-    const [filter, setFilter] = useState<'3M' | '6M' | 'YTD' | 'ALL'>('6M');
+    // FIX: Renamed filters for clarity (1M is the shortest logical period for monthly data)
+    const [filter, setFilter] = useState<'1M' | '3M' | '6M' | 'YTD' | 'ALL'>('6M');
 
     const filteredData = useMemo(() => {
         if (!data || data.length === 0) return [];
+
         const now = new Date();
+        const currentYear = now.getFullYear();
+
+        // 1. Filter out any future/incomplete data points
+        const availableData = data.filter(d => new Date(d.month_start) <= now);
+
+        const count = availableData.length;
+
         switch (filter) {
-            case '3M': return data.slice(-3);
-            case '6M': return data.slice(-6);
-            case 'YTD': return data.filter(d => new Date(d.month_start).getFullYear() === now.getFullYear());
-            case 'ALL': return data;
-            default: return data;
+            case '1M':
+                // Returns the most recent single data point
+                return availableData.slice(count - 1);
+            case '3M':
+                // Returns the last 3 available data points
+                return availableData.slice(count - 3);
+            case '6M':
+                // Returns the last 6 available data points
+                return availableData.slice(count - 6);
+            case 'YTD': {
+                // FIX: Filter based on the start of the current calendar year
+                return availableData.filter(d => new Date(d.month_start).getFullYear() === currentYear);
+            }
+            case 'ALL':
+                return availableData;
+            default:
+                return availableData.slice(count - 6);
         }
-    }, [data, filter]);
+    }, [data, filter]); // Dependency list remains correct
 
     if (!data || data.length === 0) {
         return <div className="h-full w-full flex items-center justify-center text-slate-300 text-xs bg-slate-50/50 rounded-xl border border-dashed border-slate-200" style={{ minHeight: '200px' }}>No spending data yet</div>;
@@ -39,7 +60,7 @@ export function MonthlyTrendChart({ data, currencySymbol }: { data: MonthlyData[
     return (
         <div className="flex flex-col h-full" style={{ minHeight: '240px' }}>
             <div className="flex items-center justify-end mb-1 gap-1">
-                {(['3M', '6M', 'YTD', 'ALL'] as const).map((f) => (
+                {(['1M', '3M', '6M', 'YTD', 'ALL'] as const).map((f) => (
                     <button key={f} onClick={() => setFilter(f)} className={`text-[9px] font-bold px-2 py-1 rounded-md transition-all uppercase tracking-wide ${filter === f ? 'bg-slate-800 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}>{f}</button>
                 ))}
             </div>
