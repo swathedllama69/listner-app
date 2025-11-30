@@ -184,7 +184,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     }
 
     const toggleComplete = async (item: WishlistItem) => {
-        // FIX: Simplified logic to allow reversal
         const { error } = await supabase.from("wishlist_items").update({ is_complete: !item.is_complete }).eq("id", item.id)
         if (!error) setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !i.is_complete } : i))
     }
@@ -273,6 +272,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </TabsContent>
             </Tabs>
 
+            {/* COMPLETED ITEMS - Now with Checkbox to undo */}
             {completedItems.length > 0 && (
                 <Accordion type="single" collapsible className="bg-slate-50 rounded-xl border border-slate-100 px-4 mt-4">
                     <AccordionItem value="completed" className="border-none">
@@ -280,8 +280,16 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                         <AccordionContent>
                             {completedItems.map(item => (
                                 <div key={item.id} className="flex items-center justify-between p-3 border-b last:border-0 border-slate-200">
-                                    <span className="line-through text-slate-400 text-sm">{item.name}</span>
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => toggleComplete(item)}><Trash2 className="w-3 h-3 text-slate-400" /></Button>
+                                    <div className="flex items-center gap-3">
+                                        {/* FIX: Added Checkbox to completed items for reversal */}
+                                        <Checkbox
+                                            checked={true}
+                                            onCheckedChange={() => toggleComplete(item)}
+                                            className="rounded-full border-slate-300 data-[state=checked]:bg-slate-400 data-[state=checked]:border-slate-400"
+                                        />
+                                        <span className="line-through text-slate-400 text-sm">{item.name}</span>
+                                    </div>
+                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-3 h-3 text-slate-400" /></Button>
                                 </div>
                             ))}
                         </AccordionContent>
