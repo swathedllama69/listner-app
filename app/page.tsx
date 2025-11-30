@@ -34,8 +34,8 @@ export default function Home() {
 
 // --- AUTH WRAPPER ---
 function AuthWrapper() {
-  // UPDATED STAGE: Added RECONNECTING for graceful error handling
   const [user, setUser] = useState<UserProfile | null>(null);
+  // Added RECONNECTING stage
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP' | 'RECONNECTING' | 'ERROR'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
   const [debugMsg, setDebugMsg] = useState("Initializing...");
@@ -104,7 +104,6 @@ function AuthWrapper() {
   // --- 1. CORE DATA FETCHING ---
   const loadUserData = async (currentUser: User) => {
     try {
-      // Only update debug message if not currently in RECONNECTING stage
       if (stage !== 'RECONNECTING') setDebugMsg("Loading Profile...");
 
       setupPushNotifications(currentUser);
@@ -119,25 +118,31 @@ function AuthWrapper() {
         }
       }
 
-      // Update Last Active & Version
       await supabase.from('profiles').update({
         last_active_at: new Date().toISOString(),
         app_version: appVersion
       }).eq('id', currentUser.id);
 
-      // Removed: Live Listener (Online Presence Tracking)
+      // --- SAFE ONLINE PRESENCE TRACKING ---
+      const channel = supabase.channel('online-users');
+      channel.subscribe(async (status) => {
+        if (status === 'SUBSCRIBED') {
+          await channel.track({
+            user_id: currentUser.id,
+            online_at: new Date().toISOString(),
+          });
+        }
+      });
 
       let username = currentUser.email?.split('@')[0] || 'user';
       if (username.length < 3) username = username + '_user';
 
-      // ⚡ OPTIMIZATION: Try to Read First
       let { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', currentUser.id)
         .single();
 
-      // Only Write if Profile is Missing
       if (!profile) {
         const { data: newProfile, error: createError } = await supabase
           .from('profiles')
@@ -186,7 +191,6 @@ function AuthWrapper() {
 
     } catch (err: any) {
       console.error("💥 CRITICAL LOAD ERROR:", JSON.stringify(err));
-      // Critical change: Throw error up to the calling function to handle stage transition
       throw err;
     }
   };
@@ -241,19 +245,15 @@ function AuthWrapper() {
   const handleAppResume = async () => {
     const { data: { session } } = await supabase.auth.getSession();
 
-    // Only run if we have a session and are currently viewing the app (or attempting reconnect)
     if (session?.user && (stage === 'APP' || stage === 'RECONNECTING')) {
       console.log("App resumed. Initiating reconnection sequence.");
       setStage('RECONNECTING'); // Show subtle reconnecting screen
       setDebugMsg("Reconnecting...");
 
       try {
-        // Attempt to reload user data which will also refresh the Supabase session
         await loadUserData(session.user);
         setDebugMsg("Reconnected & data reloaded.");
-        // loadUserData sets stage to APP/TUTORIAL/SETUP_HOUSEHOLD on success
       } catch (err: any) {
-        // If reconnect fails, transition to hard error screen
         console.error("❌ Reconnection failed after resume.", err);
         setErrorDetails(err.message || "Failed to establish a network connection.");
         setStage('ERROR');
@@ -268,13 +268,11 @@ function AuthWrapper() {
     if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
       listenersInitialized.current = true;
 
-      // Deep Link Listeners
       App.addListener('appUrlOpen', (data) => handleDeepLink(data.url));
       App.getLaunchUrl().then((launchData) => {
         if (launchData?.url) handleDeepLink(launchData.url);
       });
 
-      // Add App State Listener for reconnecting after screen lock
       appStateChangeListener = App.addListener('appStateChange', ({ isActive }) => {
         if (isActive) {
           handleAppResume();
@@ -300,7 +298,6 @@ function AuthWrapper() {
             setStage('AUTH');
           }
         } catch (err: any) {
-          // Catch initial critical load failures
           console.error("❌ Initial load failed.", err);
           setErrorDetails(err.message || "Failed to establish initial connection.");
           setStage('ERROR');
@@ -339,44 +336,27 @@ function AuthWrapper() {
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   };
 
-  // UI FIX: Safe Area Wrapper definition (no fixed pt-12)
   const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
 
   // --- RECONNECTING OVERLAY COMPONENT ---
   const ReconnectingOverlay = () => (
-    <div className="absolute inset-0 bg-slate-900/10 backdrop-blur-sm z-[999] flex items-center justify-center">
-      <div className="bg-white p-4 rounded-xl shadow-2xl flex flex-col items-center">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
-        <p className="mt-3 text-xs font-medium text-slate-600">{debugMsg}</p>
+    <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center animate-in fade-in duration-300">
+      <div className="bg-white p-6 rounded-2xl shadow-2xl flex flex-col items-center border border-slate-100">
+        <Loader2 className="w-10 h-10 animate-spin text-indigo-600 mb-4" />
+        <h3 className="text-sm font-bold text-slate-800">Reconnecting...</h3>
+        <p className="text-xs text-slate-500 mt-1">Synchronizing your data</p>
       </div>
     </div>
   );
 
   switch (stage) {
-    case 'LOADING':
-    case 'RECONNECTING':
-    case 'APP':
-      // Determine if we need to render the heavy dashboard or a simple loader
-      const showDashboard = user && household && (stage === 'APP' || stage === 'RECONNECTING');
-
-      return (
-        <div className="relative min-h-screen flex flex-col w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-          {/* Render Dashboard if available (only in APP/RECONNECTING stages) */}
-          {showDashboard && <Dashboard user={user} household={household} />}
-
-          {/* Show subtle overlay if RECONNECTING is active, otherwise show full LOADING screen */}
-          {stage === 'RECONNECTING' && <ReconnectingOverlay />}
-
-          {stage === 'LOADING' && (
-            <div className={`${safeAreaWrapper} absolute inset-0 bg-slate-900 items-center justify-center text-center p-6 z-[1000]`}>
-              <Loader2 className="w-12 h-12 animate-spin text-emerald-400 mb-6" />
-              <h2 className="text-lg font-semibold text-white mb-2">Loading...</h2>
-              <p className="text-xs text-slate-400 font-mono bg-slate-800 px-3 py-2 rounded-lg border border-slate-700">{debugMsg}</p>
-            </div>
-          )}
-        </div>
-      );
-
+    case 'LOADING': return (
+      <div className={`${safeAreaWrapper} bg-slate-900 items-center justify-center text-center p-6`}>
+        <Loader2 className="w-12 h-12 animate-spin text-emerald-400 mb-6" />
+        <h2 className="text-lg font-semibold text-white mb-2">Loading...</h2>
+        <p className="text-xs text-slate-400 font-mono bg-slate-800 px-3 py-2 rounded-lg border border-slate-700">{debugMsg}</p>
+      </div>
+    );
     case 'ERROR': return (
       <div className={`${safeAreaWrapper} bg-slate-50 items-center justify-center text-center p-6`}>
         <div className="bg-rose-100 p-4 rounded-full mb-4"><AlertTriangle className="w-8 h-8 text-rose-600" /></div>
@@ -393,10 +373,20 @@ function AuthWrapper() {
     case 'AUTH': return <div className={safeAreaWrapper}><AuthPage /></div>;
     case 'TUTORIAL': return <div className={safeAreaWrapper}><Tutorial onComplete={handleTutorialComplete} /></div>;
     case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => loadUserData(u)} /></div>;
+
+    case 'APP':
+    case 'RECONNECTING':
+      return (
+        <div className="relative min-h-screen flex flex-col w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+          {/* Render Dashboard if available */}
+          {user && household && <Dashboard user={user} household={household} />}
+          {/* Show overlay only if RECONNECTING */}
+          {stage === 'RECONNECTING' && <ReconnectingOverlay />}
+        </div>
+      );
     default: return null;
   }
 }
-
 
 // --- AUTH PAGE ---
 function AuthPage() {
@@ -550,7 +540,7 @@ function AuthPage() {
         <div className="w-full lg:w-1/2 h-full flex flex-col items-center justify-center p-6">
           <div className="lg:hidden mb-8 flex flex-col items-center">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-16 h-16 mb-4 object-contain" />
-            <h2 className="text-3xl font-bold tracking-tight">ListNer.</h2>
+            <h2 className="text-3xl font-bold text-slate-900 tracking-tight">ListNer.</h2>
           </div>
           <Card className="w-full max-w-[420px] border-none shadow-2xl bg-white/90 rounded-3xl overflow-hidden ring-1 ring-slate-200">
             <CardHeader className="pb-2 pt-8 text-center">

@@ -62,7 +62,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
             } catch (error) { console.error("Error:", error) } finally { setLoading(false) }
         }
         fetchGlobalStats()
-    }, [household.id, user.id, refreshTrigger]) // Added refreshTrigger
+    }, [household.id, user.id, refreshTrigger])
 
     if (loading) return <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
 
@@ -89,9 +89,8 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
     return (
         <TooltipProvider>
             <div className="space-y-4">
-                {/* STATS GRID: Clean White Cards with Accents */}
+                {/* STATS GRID */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-
                     {/* CARD 1: BALANCE */}
                     <Card className={`rounded-2xl shadow-sm border border-slate-100 group relative overflow-hidden ${isBalanced ? '' : (netPositive ? 'hover:border-emerald-200' : 'hover:border-rose-200')}`}>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-1 relative z-10">
@@ -162,13 +161,14 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                     </Card>
                 </div>
 
+                {/* CHARTS ROW */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                     <Card className="rounded-2xl border border-slate-100 p-5 hover:shadow-sm transition-all bg-white">
                         <CardTitle className="text-xs font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-wider">
                             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> Expense Breakdown
                         </CardTitle>
-                        {/* CHART JANK FIX: Applying will-change */}
-                        <div className="h-[250px] w-full" style={{ willChange: 'transform', contain: 'layout paint' }}>
+                        {/* CHART FIX: Standard container, removed will-change/contain to fix web view */}
+                        <div className="w-full">
                             <CategoryDonutChart data={finalCategoryData} currencySymbol={currencySymbol} />
                         </div>
                     </Card>
@@ -177,8 +177,8 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         <CardTitle className="text-xs font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-wider">
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Spending Trend
                         </CardTitle>
-                        {/* CHART JANK FIX: Applying will-change */}
-                        <div className="h-[250px] w-full" style={{ willChange: 'transform', contain: 'layout paint' }}>
+                        {/* CHART FIX: Standard container, removed will-change/contain to fix web view */}
+                        <div className="w-full">
                             <MonthlyTrendChart data={monthlyChartData} currencySymbol={currencySymbol} />
                         </div>
                     </Card>
