@@ -20,6 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
+import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline";
 
 /* eslint-disable @next/next/no-img-element */
 
@@ -35,33 +36,39 @@ export default function Home() {
 // --- AUTH WRAPPER ---
 function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
-  // Added RECONNECTING stage
-  const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP' | 'RECONNECTING' | 'ERROR'>('LOADING');
+  const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP' | 'ERROR'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
   const [debugMsg, setDebugMsg] = useState("Initializing...");
   const [errorDetails, setErrorDetails] = useState("");
 
-  const listenersInitialized = useRef(false);
+  // New State for Subtle Reconnecting (kept for logic, but UI removed as requested)
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
+  // Refs for State Access in Listeners (Prevents Stale Closures)
+  const stageRef = useRef(stage);
+  const userRef = useRef(user);
+
+  // Ref to prevent race conditions during Deep Link Login
+  const isProcessingDeepLink = useRef(false);
   const processedUrls = useRef<Set<string>>(new Set());
+  const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Update Refs when state changes
+  useEffect(() => { stageRef.current = stage; }, [stage]);
+  useEffect(() => { userRef.current = user; }, [user]);
 
   // --- 💡 PUSH NOTIFICATION SETUP ---
   const setupPushNotifications = async (currentUser: User) => {
     if (!Capacitor.isNativePlatform()) return;
-
-    console.log("🔔 Initializing Push Notifications...");
 
     let permStatus = await PushNotifications.checkPermissions();
     if (permStatus.receive !== 'granted') {
       permStatus = await PushNotifications.requestPermissions();
     }
 
-    if (permStatus.receive !== 'granted') {
-      console.warn("🚫 Push permission denied");
-      return;
-    }
+    if (permStatus.receive !== 'granted') return;
 
     await PushNotifications.register();
-
     await PushNotifications.createChannel({
       id: 'PushNotifications',
       name: 'General Notifications',
@@ -74,123 +81,107 @@ function AuthWrapper() {
     await PushNotifications.removeAllListeners();
 
     PushNotifications.addListener('registration', async (token) => {
-      console.log('📲 Push Registration Token:', token.value);
       await saveDeviceTokenToDB(currentUser.id, token.value, 'android');
     });
 
-    PushNotifications.addListener('registrationError', (error) => {
-      console.error('❌ Push Registration Error:', error);
-    });
-
-    PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('🔔 Push Received:', notification);
-    });
-
     PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-      console.log('👉 Push Action:', action);
-
       const data = action.notification.data;
-      const link = data?.link;
-
-      if (link) {
-        console.log("Deep Link/URL received:", link);
-        (async () => {
-          await (App as any).openUrl({ url: link });
-        })();
-      }
+      if (data?.link) (async () => { await (App as any).openUrl({ url: data.link }); })();
     });
   };
 
-  // --- 1. CORE DATA FETCHING ---
+  // --- 1. CORE DATA FETCHING (Now with Cache First) ---
   const loadUserData = async (currentUser: User) => {
+    const userCacheKey = CACHE_KEYS.USER_PROFILE(currentUser.id);
+    const householdCacheKey = CACHE_KEYS.HOUSEHOLD(currentUser.id);
+
+    // --- STEP A: TRY LOAD FROM CACHE IMMEDIATELY ---
+    const cachedUser = loadFromCache<UserProfile>(userCacheKey);
+    const cachedHousehold = loadFromCache<Household>(householdCacheKey);
+
+    if (cachedUser && cachedHousehold) {
+      console.log("⚡ Loaded from cache");
+      setUser(cachedUser);
+      setHousehold(cachedHousehold);
+      // Only set stage if we aren't deep linking
+      if (!isProcessingDeepLink.current) {
+        setStage('APP');
+      }
+    }
+
+    // --- STEP B: FETCH FROM NETWORK ---
     try {
-      if (stage !== 'RECONNECTING') setDebugMsg("Loading Profile...");
+      if (!isReconnecting) setDebugMsg("Loading Profile...");
 
       setupPushNotifications(currentUser);
 
       let appVersion = 'Web';
       if (Capacitor.isNativePlatform()) {
-        try {
-          const info = await App.getInfo();
-          appVersion = info.version;
-        } catch (e) {
-          console.warn("Could not get app version", e);
-        }
+        try { const info = await App.getInfo(); appVersion = info.version; } catch (e) { }
       }
 
-      await supabase.from('profiles').update({
-        last_active_at: new Date().toISOString(),
-        app_version: appVersion
-      }).eq('id', currentUser.id);
+      await supabase.from('profiles').update({ last_active_at: new Date().toISOString(), app_version: appVersion }).eq('id', currentUser.id);
 
-      // --- SAFE ONLINE PRESENCE TRACKING ---
+      // Online Tracking
       const channel = supabase.channel('online-users');
       channel.subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          await channel.track({
-            user_id: currentUser.id,
-            online_at: new Date().toISOString(),
-          });
+          await channel.track({ user_id: currentUser.id, online_at: new Date().toISOString() });
         }
       });
 
       let username = currentUser.email?.split('@')[0] || 'user';
       if (username.length < 3) username = username + '_user';
 
-      let { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', currentUser.id)
-        .single();
+      let { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', currentUser.id).single();
 
       if (!profile) {
-        const { data: newProfile, error: createError } = await supabase
-          .from('profiles')
-          .upsert({
-            id: currentUser.id,
-            email: currentUser.email,
-            username: username,
-            app_version: appVersion,
-            has_seen_tutorial: false
-          }, { onConflict: 'id' })
-          .select('*')
-          .single();
-
+        const { data: newProfile, error: createError } = await supabase.from('profiles').upsert({
+          id: currentUser.id, email: currentUser.email, username: username, app_version: appVersion, has_seen_tutorial: false
+        }, { onConflict: 'id' }).select('*').single();
         if (createError) throw createError;
         profile = newProfile;
       }
 
-      setDebugMsg("Loading Household...");
+      if (!isReconnecting) setDebugMsg("Loading Household...");
 
       let currentHousehold: Household | null = null;
-      const { data: memberData, error: memberError } = await supabase
-        .from("household_members")
-        .select("households(*)")
-        .eq("user_id", currentUser.id)
-        .maybeSingle();
-
-      if (memberError) console.error("Household Check Error:", memberError);
+      const { data: memberData, error: memberError } = await supabase.from("household_members").select("households(*)").eq("user_id", currentUser.id).maybeSingle();
 
       if (memberData && memberData.households) {
         currentHousehold = Array.isArray(memberData.households) ? memberData.households[0] as Household : memberData.households as Household;
       }
 
       const mergedUser: UserProfile = { ...currentUser, ...profile };
-
       const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${currentUser.id}`) : null;
       if (localSeen === 'true') mergedUser.has_seen_tutorial = true;
 
+      // Update State & Cache
       setUser(mergedUser);
       setHousehold(currentHousehold);
 
-      if (currentHousehold) {
-        setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
-      } else {
-        setStage('SETUP_HOUSEHOLD');
+      saveToCache(userCacheKey, mergedUser);
+      if (currentHousehold) saveToCache(householdCacheKey, currentHousehold);
+
+      // Only change stage if we aren't already in the app flow (avoids flickering)
+      if (stage !== 'APP') {
+        if (currentHousehold) {
+          setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
+        } else {
+          setStage('SETUP_HOUSEHOLD');
+        }
       }
 
+      setIsReconnecting(false);
+
     } catch (err: any) {
-      console.error("💥 CRITICAL LOAD ERROR:", JSON.stringify(err));
+      console.error("💥 LOAD ERROR:", err);
+      // If we have cached data, we stay in APP mode and just log the error
+      if (cachedUser && cachedHousehold) {
+        console.warn("Network failed, but running on cached data.");
+        return;
+      }
+      // Only throw if we have NOTHING to show
       throw err;
     }
   };
@@ -200,14 +191,15 @@ function AuthWrapper() {
     if (processedUrls.current.has(url)) return;
     processedUrls.current.add(url);
 
+    isProcessingDeepLink.current = true;
+
     console.log("🔗 Deep Link Detected:", url);
     setStage('LOADING');
-    setDebugMsg("Processing Login...");
+    setDebugMsg("Authenticating...");
 
     try {
       const { data: existing } = await supabase.auth.getSession();
       if (existing.session?.user) {
-        console.log("✅ Already logged in.");
         await loadUserData(existing.session.user);
         return;
       }
@@ -220,8 +212,7 @@ function AuthWrapper() {
           if (error) throw error;
           if (data.user) await loadUserData(data.user);
         }
-      }
-      else if (url.includes('access_token')) {
+      } else if (url.includes('access_token')) {
         const hashIndex = url.indexOf('#');
         const hash = url.substring(hashIndex + 1);
         const params = new URLSearchParams(hash);
@@ -235,98 +226,108 @@ function AuthWrapper() {
         }
       }
     } catch (e: any) {
-      console.error("❌ Deep Link Failed:", e);
       setErrorDetails(e.message);
       setStage('ERROR');
+    } finally {
+      isProcessingDeepLink.current = false;
     }
   };
 
-  // --- CONNECTION STABILITY FIX (App Resume) ---
-  const handleAppResume = async () => {
+  // --- CONNECTION & RESUME LOGIC ---
+  const attemptReconnect = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-
-    if (session?.user && (stage === 'APP' || stage === 'RECONNECTING')) {
-      console.log("App resumed. Initiating reconnection sequence.");
-      setStage('RECONNECTING'); // Show subtle reconnecting screen
-      setDebugMsg("Reconnecting...");
-
+    if (session?.user) {
+      setIsReconnecting(true);
       try {
         await loadUserData(session.user);
-        setDebugMsg("Reconnected & data reloaded.");
-      } catch (err: any) {
-        console.error("❌ Reconnection failed after resume.", err);
-        setErrorDetails(err.message || "Failed to establish a network connection.");
-        setStage('ERROR');
+      } catch (err) {
+        console.warn("Reconnect failed, retrying in 3s...");
+        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = setTimeout(attemptReconnect, 3000);
       }
     }
   };
 
-  // --- 3. INITIALIZATION ---
+  const handleAppResume = async () => {
+    const currentStage = stageRef.current;
+    const { data: { session } } = await supabase.auth.getSession();
+
+    if (session?.user) {
+      if (currentStage === 'APP' || currentStage === 'SETUP_HOUSEHOLD') {
+        attemptReconnect();
+      } else {
+        try {
+          await loadUserData(session.user);
+        } catch (e: any) {
+          if (!userRef.current) {
+            setErrorDetails(e.message);
+            setStage('ERROR');
+          } else {
+            attemptReconnect();
+          }
+        }
+      }
+    }
+  };
+
+  // --- 3. LISTENERS SETUP ---
   useEffect(() => {
-    let appStateChangeListener: any;
-
-    if (Capacitor.isNativePlatform() && !listenersInitialized.current) {
-      listenersInitialized.current = true;
-
+    if (Capacitor.isNativePlatform()) {
+      App.removeAllListeners();
       App.addListener('appUrlOpen', (data) => handleDeepLink(data.url));
+      App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) handleAppResume();
+      });
       App.getLaunchUrl().then((launchData) => {
         if (launchData?.url) handleDeepLink(launchData.url);
       });
-
-      appStateChangeListener = App.addListener('appStateChange', ({ isActive }) => {
-        if (isActive) {
-          handleAppResume();
-        }
-      });
     }
+
+    const handleOnline = () => attemptReconnect();
+    const handleOffline = () => setIsReconnecting(true);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
     return () => {
-      if (appStateChangeListener) appStateChangeListener.remove();
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
     }
-  }, [stage]);
+  }, []);
 
 
+  // --- 4. INITIAL AUTH CHECK ---
   useEffect(() => {
     let mounted = true;
     const init = async () => {
+      if (isProcessingDeepLink.current) return;
+
       const { data: { session } } = await supabase.auth.getSession();
       if (mounted) {
         try {
           if (session?.user) {
             await loadUserData(session.user);
           } else {
-            setStage('AUTH');
+            if (!isProcessingDeepLink.current) {
+              setStage('AUTH');
+            }
           }
         } catch (err: any) {
-          console.error("❌ Initial load failed.", err);
-          setErrorDetails(err.message || "Failed to establish initial connection.");
-          setStage('ERROR');
+          console.error("Initial load failed, retrying...");
+          setTimeout(init, 3000);
         }
       }
     };
     init();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        if (!user) loadUserData(session.user);
-      } else if (event === 'SIGNED_OUT') {
-        window.location.reload();
-      }
+      if (event === 'SIGNED_IN' && session?.user && !user) loadUserData(session.user);
+      else if (event === 'SIGNED_OUT') window.location.reload();
     });
 
-    const timeout = setTimeout(() => {
-      if (stage === 'LOADING') {
-        console.warn("⚠️ App stuck on loading. Resetting...");
-        setStage('AUTH');
-      }
-    }, 60000);
-
-    return () => {
-      mounted = false;
-      subscription.unsubscribe();
-      clearTimeout(timeout);
-    };
-  }, [stage, user]);
+    return () => { mounted = false; subscription.unsubscribe(); };
+  }, []);
 
   const handleTutorialComplete = async () => {
     if (!user) return;
@@ -337,17 +338,6 @@ function AuthWrapper() {
   };
 
   const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
-
-  // --- RECONNECTING OVERLAY COMPONENT ---
-  const ReconnectingOverlay = () => (
-    <div className="fixed inset-0 bg-white/80 backdrop-blur-sm z-[9999] flex flex-col items-center justify-center animate-in fade-in duration-300">
-      <div className="bg-white p-6 rounded-2xl shadow-2xl flex flex-col items-center border border-slate-100">
-        <Loader2 className="w-10 h-10 animate-spin text-indigo-600 mb-4" />
-        <h3 className="text-sm font-bold text-slate-800">Reconnecting...</h3>
-        <p className="text-xs text-slate-500 mt-1">Synchronizing your data</p>
-      </div>
-    </div>
-  );
 
   switch (stage) {
     case 'LOADING': return (
@@ -375,13 +365,10 @@ function AuthWrapper() {
     case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => loadUserData(u)} /></div>;
 
     case 'APP':
-    case 'RECONNECTING':
       return (
-        <div className="relative min-h-screen flex flex-col w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
-          {/* Render Dashboard if available */}
+        // UPDATED: Removed pt-[env(safe-area-inset-top)] so app fills status bar area
+        <div className="relative min-h-screen flex flex-col w-full pb-[env(safe-area-inset-bottom)]">
           {user && household && <Dashboard user={user} household={household} />}
-          {/* Show overlay only if RECONNECTING */}
-          {stage === 'RECONNECTING' && <ReconnectingOverlay />}
         </div>
       );
     default: return null;

@@ -16,7 +16,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { List, WishlistItem } from "@/lib/types"
-import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Settings, Globe, Lock, ListChecks, MoreHorizontal, ChevronDown, ChevronUp } from "lucide-react"
+import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Settings, Globe, Lock, ListChecks, MoreHorizontal, ChevronDown, ChevronUp, CloudOff } from "lucide-react"
+import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
+import { SyncQueue } from "@/lib/syncQueue"
 
 const categories = ["Item", "Project", "Vacation", "Other"]
 const priorities = ["High", "Medium", "Low"]
@@ -73,6 +75,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [isLoading, setIsLoading] = useState(true)
     const [activeTab, setActiveTab] = useState("All")
     const [page, setPage] = useState(1);
+    const [usingCachedData, setUsingCachedData] = useState(false);
     const ITEMS_PER_PAGE = 5;
 
     const [isFormOpen, setIsFormOpen] = useState(false)
@@ -91,10 +94,28 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
     useEffect(() => {
         async function getItems() {
-            setIsLoading(true)
+            const cacheKey = CACHE_KEYS.WISHLIST(list.id);
+
+            // 1. Try Cache
+            const cachedData = loadFromCache<WishlistItem[]>(cacheKey);
+            if (cachedData) {
+                setItems(cachedData);
+                setUsingCachedData(true);
+                setIsLoading(false);
+            } else {
+                setIsLoading(true);
+            }
+
+            // 2. Fetch Network
             const { data, error } = await supabase.from("wishlist_items").select("*").eq("list_id", list.id).order("created_at", { ascending: false })
-            if (!error) setItems(data as WishlistItem[])
-            setIsLoading(false)
+
+            // 3. Update & Save
+            if (!error && data) {
+                setItems(data as WishlistItem[]);
+                saveToCache(cacheKey, data);
+                setUsingCachedData(false);
+            }
+            setIsLoading(false);
         }
         getItems()
     }, [list.id])
@@ -127,20 +148,66 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         }
     }
 
+    // --- FAIL-SAFE ADD ITEM ---
     const handleAddItem = async (e: FormEvent) => {
         e.preventDefault();
         const target = parseFloat(form.target_amount);
         const saved = parseFloat(form.saved_amount);
         const qty = parseInt(form.quantity);
 
-        const { data, error } = await supabase.from('wishlist_items').insert({
-            list_id: list.id, user_id: user.id, name: form.name, description: form.description || null,
-            category: form.category, target_amount: isNaN(target) ? null : target, saved_amount: isNaN(saved) ? 0 : saved,
-            quantity: (form.category === "Item") ? qty : null, link: form.link || null, priority: form.priority
-        }).select().single();
+        const newItemPayload = {
+            list_id: list.id,
+            user_id: user.id,
+            name: form.name,
+            description: form.description || null,
+            category: form.category,
+            target_amount: isNaN(target) ? null : target,
+            saved_amount: isNaN(saved) ? 0 : saved,
+            quantity: (form.category === "Item") ? qty : null,
+            link: form.link || null,
+            priority: form.priority
+        };
 
-        if (!error) { setItems([data as WishlistItem, ...items]); setIsFormOpen(false); setForm({ name: "", description: "", category: "Item", target_amount: "", saved_amount: "", quantity: "1", link: "", priority: "Medium" }); }
-        else { alert("Error: " + error.message); }
+        const executeOfflineSave = () => {
+            console.log("Executing offline save...");
+            const tempItem: WishlistItem = {
+                id: -Date.now(),
+                created_at: new Date().toISOString(),
+                is_complete: false,
+                ...newItemPayload
+            } as any;
+
+            const newItems = [tempItem, ...items];
+            setItems(newItems);
+            saveToCache(CACHE_KEYS.WISHLIST(list.id), newItems);
+
+            SyncQueue.add({
+                type: 'ADD_WISHLIST_ITEM',
+                payload: tempItem,
+                householdId: list.household_id
+            });
+
+            setIsFormOpen(false);
+            setForm({ name: "", description: "", category: "Item", target_amount: "", saved_amount: "", quantity: "1", link: "", priority: "Medium" });
+        };
+
+        if (navigator.onLine) {
+            try {
+                const { data, error } = await supabase.from('wishlist_items').insert(newItemPayload).select().single();
+                if (error) throw error;
+
+                const newItems = [data as WishlistItem, ...items];
+                setItems(newItems);
+                saveToCache(CACHE_KEYS.WISHLIST(list.id), newItems);
+                setIsFormOpen(false);
+                setForm({ name: "", description: "", category: "Item", target_amount: "", saved_amount: "", quantity: "1", link: "", priority: "Medium" });
+            } catch (err) {
+                console.warn("Online add failed, falling back to offline queue.", err);
+                executeOfflineSave();
+            }
+        } else {
+            executeOfflineSave();
+        }
     }
 
     const handleAddContribution = async (e: FormEvent) => {
@@ -189,11 +256,14 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     }
 
     return (
-        <div className="space-y-6 pb-24">
+        <div className={`space-y-6 pb-24 transition-opacity duration-500 ${usingCachedData ? 'opacity-90 grayscale-[10%]' : ''}`}>
             <div className="flex items-center justify-between">
                 <div>
                     <h2 className="text-2xl font-bold text-slate-800">{list.name}</h2>
-                    <div className="flex gap-2 mt-1">{listSettings.isPrivate ? <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100"><Lock className="w-3 h-3" /> Private</span> : <span className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100"><Globe className="w-3 h-3" /> Shared</span>}</div>
+                    <div className="flex gap-2 mt-1">
+                        {listSettings.isPrivate ? <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100"><Lock className="w-3 h-3" /> Private</span> : <span className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100"><Globe className="w-3 h-3" /> Shared</span>}
+                        {usingCachedData && <span className="flex items-center gap-1 text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"><CloudOff className="w-3 h-3" /> Offline View</span>}
+                    </div>
                 </div>
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild><Button variant="outline" size="icon"><Settings className="w-4 h-4" /></Button></DropdownMenuTrigger>
@@ -272,7 +342,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </TabsContent>
             </Tabs>
 
-            {/* COMPLETED ITEMS - Now with Checkbox to undo */}
+            {/* COMPLETED ITEMS - Now with Edit & Undo */}
             {completedItems.length > 0 && (
                 <Accordion type="single" collapsible className="bg-slate-50 rounded-xl border border-slate-100 px-4 mt-4">
                     <AccordionItem value="completed" className="border-none">
@@ -281,7 +351,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                             {completedItems.map(item => (
                                 <div key={item.id} className="flex items-center justify-between p-3 border-b last:border-0 border-slate-200">
                                     <div className="flex items-center gap-3">
-                                        {/* FIX: Added Checkbox to completed items for reversal */}
                                         <Checkbox
                                             checked={true}
                                             onCheckedChange={() => toggleComplete(item)}
@@ -289,7 +358,16 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                                         />
                                         <span className="line-through text-slate-400 text-sm">{item.name}</span>
                                     </div>
-                                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-3 h-3 text-slate-400" /></Button>
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="ghost" size="icon" className="h-7 w-7"><MoreHorizontal className="w-3.5 h-3.5 text-slate-400" /></Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                            <DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Details</DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
                                 </div>
                             ))}
                         </AccordionContent>
@@ -304,9 +382,9 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 <DialogContent className="sm:max-w-md rounded-2xl">
                     <DialogHeader><DialogTitle>New Goal</DialogTitle></DialogHeader>
                     <form onSubmit={handleAddItem} className="grid grid-cols-2 gap-4 py-2">
-                        <div className="col-span-2"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="h-11" required /></div>
-                        <div><Label>Target ({currencySymbol})</Label><Input type="number" value={form.target_amount} onChange={e => setForm({ ...form, target_amount: e.target.value })} className="h-11" required /></div>
-                        <div><Label>Initial Saved</Label><Input type="number" value={form.saved_amount} onChange={e => setForm({ ...form, saved_amount: e.target.value })} className="h-11" /></div>
+                        <div className="col-span-2"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="h-11" required autoComplete="off" /></div>
+                        <div><Label>Target ({currencySymbol})</Label><Input type="number" value={form.target_amount} onChange={e => setForm({ ...form, target_amount: e.target.value })} className="h-11" required autoComplete="off" /></div>
+                        <div><Label>Initial Saved</Label><Input type="number" value={form.saved_amount} onChange={e => setForm({ ...form, saved_amount: e.target.value })} className="h-11" autoComplete="off" /></div>
                         <div className="col-span-2 grid grid-cols-2 gap-4">
                             <div><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
                             <div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div>
@@ -317,14 +395,14 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             </Dialog>
 
             <Dialog open={isContributionOpen} onOpenChange={setIsContributionOpen}>
-                <DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>Add Funds</DialogTitle></DialogHeader><form onSubmit={handleAddContribution} className="space-y-4 py-2"><div className="space-y-2"><Label>Amount ({currencySymbol})</Label><Input type="number" className="h-14 text-2xl font-bold text-center" placeholder="0.00" value={contribForm.amount} onChange={e => setContribForm({ ...contribForm, amount: e.target.value })} autoFocus /></div><Input placeholder="Note (optional)" value={contribForm.note} onChange={e => setContribForm({ ...contribForm, note: e.target.value })} className="h-11" /><Button type="submit" className="w-full h-11 bg-emerald-600 text-lg">Confirm</Button></form></DialogContent>
+                <DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>Add Funds</DialogTitle></DialogHeader><form onSubmit={handleAddContribution} className="space-y-4 py-2"><div className="space-y-2"><Label>Amount ({currencySymbol})</Label><Input type="number" className="h-14 text-2xl font-bold text-center" placeholder="0.00" value={contribForm.amount} onChange={e => setContribForm({ ...contribForm, amount: e.target.value })} autoFocus autoComplete="off" /></div><Input placeholder="Note (optional)" value={contribForm.note} onChange={e => setContribForm({ ...contribForm, note: e.target.value })} className="h-11" autoComplete="off" /><Button type="submit" className="w-full h-11 bg-emerald-600 text-lg">Confirm</Button></form></DialogContent>
             </Dialog>
 
             <Dialog open={!!editingItem} onOpenChange={() => setEditingItem(null)}>
                 {editingItem && <EditWishlistItemForm item={editingItem} onUpdate={handleUpdateItem} onClose={() => setEditingItem(null)} currencySymbol={currencySymbol} />}
             </Dialog>
 
-            <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}><DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>Rename List</DialogTitle></DialogHeader><div className="flex gap-2 py-2"><Input value={listNameForm} onChange={e => setListNameForm(e.target.value)} className="h-11" /><Button onClick={handleRenameList}>Save</Button></div></DialogContent></Dialog>
+            <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}><DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>Rename List</DialogTitle></DialogHeader><div className="flex gap-2 py-2"><Input value={listNameForm} onChange={e => setListNameForm(e.target.value)} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div></DialogContent></Dialog>
 
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete Item?" description="This action cannot be undone." onConfirm={handleDelete} />
         </div>
@@ -337,6 +415,46 @@ function EditWishlistItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
     const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [e.target.name]: e.target.value });
     const handleSubmit = async (e: FormEvent) => { e.preventDefault(); setIsSubmitting(true); await onUpdate({ ...form, target_amount: parseFloat(form.target_amount) || null, saved_amount: parseFloat(form.saved_amount) || 0, quantity: form.category === "Item" ? parseInt(form.quantity) : null }); setIsSubmitting(false); onClose(); };
     return (
-        <DialogContent className="sm:max-w-[625px] rounded-2xl"><DialogHeader><DialogTitle>Edit Goal</DialogTitle></DialogHeader><form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4"><div className="col-span-2"><Label>Name</Label><Input name="name" value={form.name} onChange={handleChange} required /></div><div className="col-span-2"><Label>Description</Label><Textarea name="description" value={form.description} onChange={handleChange} /></div><div className="col-span-1"><Label>Target ({currencySymbol})</Label><Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required /></div><div className="col-span-1"><Label>Saved ({currencySymbol})</Label><Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} /></div><div className="col-span-1"><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div><div className="col-span-1"><Label>Link</Label><Input name="link" value={form.link} onChange={handleChange} /></div><DialogFooter className="col-span-2"><Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button></DialogFooter></form></DialogContent>
+        <DialogContent className="sm:max-w-[625px] rounded-2xl">
+            <DialogHeader>
+                <DialogTitle>Edit Goal</DialogTitle>
+            </DialogHeader>
+            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4">
+                <div className="col-span-2">
+                    <Label>Name</Label>
+                    <Input name="name" value={form.name} onChange={handleChange} required autoComplete="off" />
+                </div>
+                <div className="col-span-2">
+                    <Label>Description</Label>
+                    <Textarea name="description" value={form.description} onChange={handleChange} autoComplete="off" />
+                </div>
+                <div className="col-span-1">
+                    <Label>Target ({currencySymbol})</Label>
+                    <Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required autoComplete="off" />
+                </div>
+                <div className="col-span-1">
+                    <Label>Saved ({currencySymbol})</Label>
+                    <Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} autoComplete="off" />
+                </div>
+                <div className="col-span-1">
+                    <Label>Priority</Label>
+                    <Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}>
+                        <SelectTrigger>
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="col-span-1">
+                    <Label>Link</Label>
+                    <Input name="link" value={form.link} onChange={handleChange} autoComplete="off" />
+                </div>
+                <DialogFooter className="col-span-2">
+                    <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button>
+                </DialogFooter>
+            </form>
+        </DialogContent>
     );
 }

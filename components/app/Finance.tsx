@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
     DollarSign, Wallet, History, HandCoins, Pencil, Trash2,
     ChevronDown, ChevronLeft, ChevronRight, Download,
-    Info, Lightbulb, FileSpreadsheet, ArrowRightLeft
+    Info, Lightbulb, FileSpreadsheet, ArrowRightLeft, CloudOff
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -22,10 +22,12 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { EXPENSE_CATEGORIES } from "@/lib/constants"
+import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
+import { SyncQueue } from "@/lib/syncQueue"
 
 type HouseholdMember = { user_id: string; email: string }
-type Expense = { id: number; name: string; amount: number; category: string; user_id: string; notes: string | null; expense_date: string }
-type Credit = { id: number; amount: number; notes: string | null; is_settled: boolean; lender_user_id: string | null; lender_name: string; borrower_user_id: string | null; borrower_name: string; created_at: string }
+type Expense = { id: number; name: string; amount: number; category: string; user_id: string; notes: string | null; expense_date: string; is_pending?: boolean }
+type Credit = { id: number; amount: number; notes: string | null; is_settled: boolean; lender_user_id: string | null; lender_name: string; borrower_user_id: string | null; borrower_name: string; created_at: string; is_pending?: boolean }
 
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
@@ -39,26 +41,57 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     const [members, setMembers] = useState<HouseholdMember[]>([])
     const [expenses, setExpenses] = useState<Expense[]>([])
     const [credits, setCredits] = useState<Credit[]>([])
+    const [usingCachedData, setUsingCachedData] = useState(false);
 
     useEffect(() => {
         async function fetchFinanceData() {
-            const { data: memberData } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
-            if (memberData) {
-                const mappedMembers = memberData.map((m: any) => ({
-                    user_id: m.user_id,
-                    email: m.profiles?.email || 'Partner'
-                }));
-                setMembers(mappedMembers);
+            const expenseKey = CACHE_KEYS.FINANCE_DATA(household.id);
+            const creditKey = CACHE_KEYS.FINANCE_CREDITS(household.id);
+
+            // 1. Load Cache First
+            const cachedExpenses = loadFromCache<Expense[]>(expenseKey);
+            const cachedCredits = loadFromCache<Credit[]>(creditKey);
+
+            if (cachedExpenses && cachedCredits && refreshTrigger === 0) {
+                setExpenses(cachedExpenses);
+                setCredits(cachedCredits);
+                setUsingCachedData(true);
             }
 
-            const { data: expenseData } = await supabase.from('expenses').select('*').eq('household_id', household.id).order('expense_date', { ascending: false });
-            if (expenseData) setExpenses(expenseData as Expense[]);
+            // 2. Network Request
+            try {
+                const { data: memberData } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
+                if (memberData) {
+                    const mappedMembers = memberData.map((m: any) => ({
+                        user_id: m.user_id,
+                        email: m.profiles?.email || 'Partner'
+                    }));
+                    setMembers(mappedMembers);
+                }
 
-            const { data: creditData } = await supabase.from('credits').select('*').eq('household_id', household.id).order('is_settled', { ascending: true }).order('created_at', { ascending: false });
-            if (creditData) setCredits(creditData as Credit[]);
+                const { data: expenseData, error: expenseError } = await supabase.from('expenses').select('*').eq('household_id', household.id).order('expense_date', { ascending: false });
+                if (expenseData) {
+                    setExpenses(expenseData as Expense[]);
+                    saveToCache(expenseKey, expenseData);
+                }
+
+                const { data: creditData, error: creditError } = await supabase.from('credits').select('*').eq('household_id', household.id).order('is_settled', { ascending: true }).order('created_at', { ascending: false });
+                if (creditData) {
+                    setCredits(creditData as Credit[]);
+                    saveToCache(creditKey, creditData);
+                }
+
+                // If successful, we are no longer relying *only* on cache
+                if (!expenseError && !creditError) setUsingCachedData(false);
+
+            } catch (err) {
+                console.error("Finance fetch error", err);
+                // Stay on cached data if network fails
+            }
         }
         fetchFinanceData();
 
+        // Realtime subscriptions
         const expenseChannel = supabase.channel('expenses_changes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `household_id=eq.${household.id}` }, (payload) => {
                 if (payload.eventType === 'INSERT') setExpenses((prev) => [payload.new as Expense, ...prev]);
@@ -113,11 +146,13 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
 
     return (
         <TooltipProvider>
-            <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
+            <div className={`w-full relative min-h-[80vh] flex flex-col bg-slate-50/50 transition-opacity duration-500 ${usingCachedData ? 'opacity-90 grayscale-[10%]' : ''}`}>
                 {/* THEME UPDATED HEADER: Teal/Emerald Gradient */}
                 <div className="sticky top-0 z-10 bg-gradient-to-r from-teal-600 to-emerald-600 text-white px-6 py-4 flex items-center justify-between shadow-md mb-6">
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-teal-100 uppercase tracking-widest">Net Position</span>
+                        <span className="text-[10px] font-bold text-teal-100 uppercase tracking-widest flex items-center gap-2">
+                            Net Position {usingCachedData && <CloudOff className="w-3 h-3 text-teal-200" />}
+                        </span>
                         {!isBalanced && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
                     </div>
                     <div className="text-3xl font-bold tracking-tight">
@@ -227,10 +262,48 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
 
         if (!form.name || amountToLog <= 0) return alert('Invalid details');
         setIsSubmitting(true);
+
+        const newExpensePayload = {
+            user_id: user.id,
+            household_id: household.id,
+            name: form.name,
+            amount: amountToLog,
+            category: form.category,
+            notes: form.notes || null,
+            expense_date: new Date().toISOString()
+        };
+
+        // --- OFFLINE LOGIC START ---
+        if (!navigator.onLine) {
+            const tempExpense: Expense = {
+                id: -Date.now(),
+                ...newExpensePayload,
+                is_pending: true
+            } as any;
+
+            const newExpenses = [tempExpense, ...expenses];
+            setExpenses(newExpenses);
+            saveToCache(CACHE_KEYS.FINANCE_DATA(household.id), newExpenses);
+
+            SyncQueue.add({
+                type: 'ADD_EXPENSE',
+                payload: tempExpense,
+                householdId: household.id
+            });
+
+            // Queue Reimbursable Credit logic is complex offline, skipping for now or handle as separate action
+            // For MVP offline, we focus on main expense. Credits might need to wait for online.
+            // Or add separate CREDIT action.
+
+            setForm({ name: '', price: '', quantity: '1', amount: '', category: EXPENSE_CATEGORIES[0], isReimbursable: false, reimburseAmount: '', notes: '', borrowerId: '' });
+            alert('Saved offline!');
+            setIsSubmitting(false);
+            return;
+        }
+        // --- OFFLINE LOGIC END ---
+
         try {
-            const { data: expense, error: expenseError } = await supabase.from('expenses').insert({
-                user_id: user.id, household_id: household.id, name: form.name, amount: amountToLog, category: form.category, notes: form.notes || null, expense_date: new Date().toISOString()
-            }).select().single();
+            const { data: expense, error: expenseError } = await supabase.from('expenses').insert(newExpensePayload).select().single();
 
             if (expenseError) throw expenseError;
 
@@ -300,11 +373,11 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">History</h3><div className="flex gap-1">{['Month', 'Prev', 'All'].map((f: any) => (<button key={f} onClick={() => { setFilter(f); setPage(1); }} className={`text-[10px] px-2 py-1 rounded-md font-bold transition-colors ${filter === f ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-600 bg-slate-50'}`}>{f === 'Month' ? 'This Month' : f === 'Prev' ? 'Last Month' : 'All Time'}</button>))}</div></div>
                 {paginatedExpenses.length === 0 ? <div className="text-center py-8 text-slate-400 text-xs">No expenses found.</div> :
                     paginatedExpenses.map((expense) => (
-                        <div key={expense.id} className={`bg-white border rounded-xl shadow-sm transition-all cursor-pointer hover:border-indigo-200 group relative`} onClick={() => setEditingExpense(expense)}>
+                        <div key={expense.id} className={`bg-white border rounded-xl shadow-sm transition-all cursor-pointer hover:border-indigo-200 group relative ${expense.is_pending ? 'opacity-70 border-dashed border-amber-300' : ''}`} onClick={() => setEditingExpense(expense)}>
                             <div className="flex justify-between items-center p-3">
                                 <div className="flex items-center gap-3">
                                     <div className={`h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-100 text-slate-500`}>{expense.category.substring(0, 2).toUpperCase()}</div>
-                                    <div><p className="font-semibold text-slate-800 text-sm">{expense.name}</p><p className="text-[10px] text-slate-500">{new Date(expense.expense_date).toLocaleDateString()}</p></div>
+                                    <div><p className="font-semibold text-slate-800 text-sm flex items-center gap-2">{expense.name} {expense.is_pending && <CloudOff className="w-3 h-3 text-amber-500" />}</p><p className="text-[10px] text-slate-500">{new Date(expense.expense_date).toLocaleDateString()}</p></div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className="font-bold text-slate-700 text-sm">{currencySymbol}{hideBalances ? '****' : expense.amount.toLocaleString()}</span>
@@ -359,7 +432,42 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         let lenderName = isOweMe ? 'Me' : form.personName; let borrowerName = !isOweMe ? 'Me' : form.personName;
         if (partnerId && !form.personName) { if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; } else { lenderId = partnerId; lenderName = 'Partner'; } }
 
-        const { data, error } = await supabase.from('credits').insert({ household_id: household.id, amount, notes: form.notes || 'Manual', lender_user_id: lenderId, lender_name: lenderName, borrower_user_id: borrowerId, borrower_name: borrowerName }).select().single();
+        const newCreditPayload = {
+            household_id: household.id,
+            amount,
+            notes: form.notes || 'Manual',
+            lender_user_id: lenderId,
+            lender_name: lenderName,
+            borrower_user_id: borrowerId,
+            borrower_name: borrowerName
+        };
+
+        // --- OFFLINE LOGIC ---
+        if (!navigator.onLine) {
+            const tempCredit: Credit = {
+                id: -Date.now(),
+                ...newCreditPayload,
+                is_settled: false,
+                created_at: new Date().toISOString(),
+                is_pending: true
+            } as any;
+
+            const newCredits = [tempCredit, ...credits];
+            setCredits(newCredits);
+            saveToCache(CACHE_KEYS.FINANCE_CREDITS(household.id), newCredits);
+
+            SyncQueue.add({
+                type: 'ADD_CREDIT',
+                payload: tempCredit,
+                householdId: household.id
+            });
+
+            setForm({ amount: '', notes: '', direction: 'owe_me', personName: '' });
+            alert("Saved offline!");
+            return;
+        }
+
+        const { data, error } = await supabase.from('credits').insert(newCreditPayload).select().single();
         if (error) { alert(error.message); } else { setCredits([data as Credit, ...credits]); setForm({ amount: '', notes: '', direction: 'owe_me', personName: '' }); }
     }
 
@@ -403,11 +511,12 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
                 {activeCredits.length === 0 ? <p className="text-slate-400 text-center py-4 text-sm">All settled up!</p> : activeCredits.map(c => {
                     const isOwedToMe = c.lender_user_id === user.id;
                     return (
-                        <div key={c.id} onClick={() => setEditingCredit(c)} className={`group flex justify-between items-center p-3 mb-2 rounded-lg border cursor-pointer hover:shadow-md transition-all ${isOwedToMe ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+                        <div key={c.id} onClick={() => setEditingCredit(c)} className={`group flex justify-between items-center p-3 mb-2 rounded-lg border cursor-pointer hover:shadow-md transition-all ${isOwedToMe ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'} ${c.is_pending ? 'opacity-70 border-dashed border-amber-300' : ''}`}>
                             <div className="flex-1">
                                 <div className="flex items-center gap-2">
                                     <span className={`font-bold ${isOwedToMe ? 'text-emerald-700' : 'text-rose-700'}`}>{currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()}</span>
                                     <Badge variant="outline" className="bg-white text-xs font-normal">{isOwedToMe ? "Owed to You" : "You Owe"}</Badge>
+                                    {c.is_pending && <CloudOff className="w-3 h-3 text-amber-500" />}
                                 </div>
                                 <p className="text-xs text-slate-500 mt-1 font-medium">{c.notes} <span className="opacity-50">• {isOwedToMe ? c.borrower_name : c.lender_name}</span></p>
                             </div>

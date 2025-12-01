@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, ChevronLeft } from "lucide-react"
+import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, ChevronLeft, Wifi, WifiOff, RefreshCw, CheckCircle2 } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SidebarLayout } from "@/components/ui/SidebarLayout"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -30,6 +30,7 @@ import { HouseholdSyncDialog } from "@/components/app/HouseholdSyncDialog"
 import { SettingsView } from "@/components/app/SettingsView"
 import { NotificationBell } from "@/components/app/NotificationBell"
 import { Household, List } from "@/lib/types"
+import { SyncQueue } from "@/lib/syncQueue"
 
 // --- TYPES ---
 type ListWithSummary = List & { pending_items?: number; estimated_cost?: number; active_goals?: number; target_amount?: number; saved_amount?: number; };
@@ -257,7 +258,52 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const [isSyncOpen, setIsSyncOpen] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
     const [hideBalances, setHideBalances] = useState(false);
+
+    // OFFLINE STATE LOGIC
+    const [offlineStatus, setOfflineStatus] = useState<'online' | 'offline' | 'syncing' | 'synced'>('online');
+
     const currencySymbol = getCurrencySymbol(household.currency || 'NGN');
+
+    useEffect(() => {
+        // Init check
+        if (!navigator.onLine) setOfflineStatus('offline');
+
+        const handleOnline = async () => {
+            // Check true connectivity before trying to sync
+            try {
+                // A simple HEAD request to a reliable high-availability CDN or API
+                await fetch('https://www.google.com/favicon.ico', { mode: 'no-cors' });
+            } catch (e) {
+                // Still offline
+                console.warn("Navigator says online, but fetch failed. Staying offline.");
+                return;
+            }
+
+            setOfflineStatus('syncing');
+
+            // 1. Process Queue (Sync Data)
+            await SyncQueue.process();
+
+            // 2. Refresh UI Data
+            setRefreshKey(p => p + 1);
+
+            // 3. Show Success
+            setTimeout(() => {
+                setOfflineStatus('synced');
+                // UPDATED: Increased timeout from 2000 to 5000 as requested
+                setTimeout(() => setOfflineStatus('online'), 5000);
+            }, 1000);
+        };
+        const handleOffline = () => setOfflineStatus('offline');
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        return () => {
+            window.removeEventListener('online', handleOnline);
+            window.removeEventListener('offline', handleOffline);
+        }
+    }, []);
 
     useEffect(() => {
         if (Capacitor.isNativePlatform()) {
@@ -309,14 +355,27 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         if (typeof window !== "undefined") window.location.reload();
     }
 
+    // --- STATUS BADGE COMPONENT ---
+    const StatusBadge = () => {
+        if (offlineStatus === 'online') return null;
+        if (offlineStatus === 'offline') return <span className="bg-amber-100 text-amber-700 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><WifiOff className="w-3 h-3" /> Offline</span>;
+        if (offlineStatus === 'syncing') return <span className="bg-indigo-100 text-indigo-700 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Syncing...</span>;
+        if (offlineStatus === 'synced') return <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><CheckCircle2 className="w-3 h-3" /> Back Online</span>;
+        return null;
+    }
+
     return (
         <SidebarLayout user={user} household={household} memberCount={memberCount} activeTab={activeTab} setActiveTab={setActiveTab}>
-            <div className="w-full pb-24 relative">
+            {/* FIXED: Removed pt-4 to remove big indent, now just pt-0 to be flush with header */}
+            <div className="w-full pb-24 relative pt-0">
 
                 {/* Desktop Header */}
-                <div className="hidden md:flex flex-row items-center justify-between gap-4 mb-6">
+                <div className="hidden md:flex flex-row items-center justify-between gap-4 mb-6 pt-6">
                     <div>
-                        <h1 className="text-lg font-semibold text-slate-500 tracking-tight">{getPageTitle(activeTab)}</h1>
+                        <div className="flex items-center gap-3">
+                            <h1 className="text-lg font-semibold text-slate-500 tracking-tight">{getPageTitle(activeTab)}</h1>
+                            <StatusBadge />
+                        </div>
                         {activeTab === 'home' && <p className="text-sm text-slate-400 font-medium mt-0.5">{greeting}</p>}
                     </div>
                     <div className="flex items-center gap-3">
@@ -332,11 +391,13 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     </div>
                 </div>
 
-                {/* Mobile Header - PADDING FIX */}
-                {/* Reduced mb-6 to mb-3 to pull greeting closer to top */}
-                <div className="md:hidden mb-3 space-y-3">
+                {/* Mobile Header - FIXED: Minimized top padding and spacing - UPDATED TO USE SAFE AREA */}
+                <div className="md:hidden mb-2 space-y-1 pt-[env(safe-area-inset-top)] mt-2">
                     <div className="flex justify-between items-center">
-                        <h1 className="text-xl font-bold text-slate-800 tracking-tight">{getPageTitle(activeTab)}</h1>
+                        <div className="flex items-center gap-2">
+                            <h1 className="text-xl font-bold text-slate-800 tracking-tight">{getPageTitle(activeTab)}</h1>
+                            <StatusBadge />
+                        </div>
                         {memberCount < 2 && (
                             <Button onClick={() => setIsSyncOpen(true)} className="bg-violet-600 text-white rounded-full text-xs h-8 px-3 font-bold">
                                 <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Invite
@@ -359,7 +420,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
                 {/* --- CONTENT --- */}
                 <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                    {/* ANIMATION FIX: Removed complex CSS animations to reduce main thread jank */}
                     <TabsContent value="home" className="space-y-6">
                         <HomeOverview user={user} household={household} currencySymbol={currencySymbol} hideBalances={hideBalances} refreshTrigger={refreshKey} />
                     </TabsContent>

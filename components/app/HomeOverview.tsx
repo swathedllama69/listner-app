@@ -1,16 +1,18 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useMemo } from "react"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Household } from "@/lib/types"
-import { ArrowRightLeft, ShoppingCart, PiggyBank, Loader2, Wallet, ArrowUp, ArrowDown } from "lucide-react"
+import { ArrowRightLeft, ShoppingCart, PiggyBank, Loader2, Wallet, ArrowUp, ArrowDown, CloudOff } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 import { MonthlyTrendChart } from "./MonthlyTrendChart";
 import { CategoryDonutChart } from "./CategoryDonutChart";
+import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline";
 
 const CATEGORY_COLORS: { [key: string]: string } = {
     "Groceries": "#22c55e",
@@ -22,7 +24,6 @@ const CATEGORY_COLORS: { [key: string]: string } = {
     "Other": "#94a3b8"
 };
 
-// Helper: Get background color class for the Progress Bar Indicator
 const getProgressIndicatorColor = (percent: number) => {
     if (percent >= 100) return "bg-emerald-500";
     if (percent >= 70) return "bg-emerald-500";
@@ -30,7 +31,6 @@ const getProgressIndicatorColor = (percent: number) => {
     return "bg-rose-500";
 };
 
-// Helper: Get text color class for the Percentage Text
 const getProgressTextColor = (percent: number) => {
     if (percent >= 100) return "text-emerald-600";
     if (percent >= 70) return "text-emerald-600";
@@ -40,45 +40,139 @@ const getProgressTextColor = (percent: number) => {
 
 export function HomeOverview({ user, household, currencySymbol, hideBalances, refreshTrigger }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number }) {
     const [loading, setLoading] = useState(true)
+    const [usingCachedData, setUsingCachedData] = useState(false);
+
+    // FILTERS
+    const [categoryFilter, setCategoryFilter] = useState<'this_month' | 'last_month' | 'all'>('this_month');
+
+    // DATA STATES
     const [stats, setStats] = useState({
         netBalance: 0, shoppingCount: 0, shoppingCost: 0, wishlistSaved: 0,
-        wishlistTotal: 0, monthlySpend: 0, priorMonthlySpend: 0, unsettledCount: 0,
-        chartData: { monthly: [] as any[], category: {} as any }
+        wishlistTotal: 0, monthlySpend: 0, priorMonthlySpend: 0, unsettledCount: 0
     })
+    const [allExpenses, setAllExpenses] = useState<any[]>([]); // Raw expenses for flexible charting
 
     useEffect(() => {
-        async function fetchGlobalStats() {
-            try {
-                // Only set loading true if it's the initial load to avoid flickering on soft refresh
-                if (refreshTrigger === 0) setLoading(true)
+        async function fetchData() {
+            const cacheKey = CACHE_KEYS.DASHBOARD_STATS(household.id);
 
-                const { data: dashboardData, error } = await supabase.rpc('get_global_dashboard_data', {
+            // 1. Try Cache
+            const cached = loadFromCache<any>(cacheKey);
+            if (cached && refreshTrigger === 0) {
+                setStats(cached.stats);
+                setAllExpenses(cached.expenses || []);
+                setUsingCachedData(true);
+                setLoading(false);
+            } else if (refreshTrigger === 0) {
+                setLoading(true);
+            }
+
+            try {
+                // 2. Fetch Dashboard Stats (RPC)
+                const { data: dashboardData, error: rpcError } = await supabase.rpc('get_global_dashboard_data', {
                     target_household_id: household.id,
                     current_user_id: user.id
                 });
 
-                if (error) { console.error("RPC Error:", error.message); return; }
+                if (rpcError) throw rpcError;
 
-                const data = dashboardData as any;
-                const monthlyTrendData = data.monthly_trend_data || [];
-                const categoryBreakdown = data.category_breakdown || {};
+                // 3. Fetch Recent Expenses (for flexible charts)
+                // We fetch enough history to handle "All Time" or at least last year for trends
+                const { data: expenseData, error: expError } = await supabase
+                    .from('expenses')
+                    .select('amount, category, expense_date')
+                    .eq('household_id', household.id)
+                    .order('expense_date', { ascending: false });
 
-                setStats({
-                    netBalance: parseFloat(data.net_balance) || 0,
-                    monthlySpend: parseFloat(data.monthly_spend) || 0,
-                    priorMonthlySpend: parseFloat(data.prior_monthly_spend) || 0,
-                    unsettledCount: data.unsettled_count || 0,
-                    shoppingCount: data.shopping_count || 0,
-                    shoppingCost: parseFloat(data.shopping_cost) || 0,
-                    wishlistSaved: parseFloat(data.wishlist_saved) || 0,
-                    wishlistTotal: parseFloat(data.wishlist_total) || 0,
-                    chartData: { monthly: monthlyTrendData, category: categoryBreakdown }
-                });
+                if (expError) throw expError;
 
-            } catch (error) { console.error("Error:", error) } finally { setLoading(false) }
+                const finalStats = {
+                    netBalance: parseFloat(dashboardData.net_balance) || 0,
+                    monthlySpend: parseFloat(dashboardData.monthly_spend) || 0,
+                    priorMonthlySpend: parseFloat(dashboardData.prior_monthly_spend) || 0,
+                    unsettledCount: dashboardData.unsettled_count || 0,
+                    shoppingCount: dashboardData.shopping_count || 0,
+                    shoppingCost: parseFloat(dashboardData.shopping_cost) || 0,
+                    wishlistSaved: parseFloat(dashboardData.wishlist_saved) || 0,
+                    wishlistTotal: parseFloat(dashboardData.wishlist_total) || 0,
+                };
+
+                setStats(finalStats);
+                setAllExpenses(expenseData || []);
+                setUsingCachedData(false);
+
+                // Save combined data to cache
+                saveToCache(cacheKey, { stats: finalStats, expenses: expenseData });
+
+            } catch (error) {
+                console.error("Fetch error:", error);
+            } finally {
+                setLoading(false);
+            }
         }
-        fetchGlobalStats()
-    }, [household.id, user.id, refreshTrigger])
+
+        fetchData();
+    }, [household.id, user.id, refreshTrigger]);
+
+
+    // --- PROCESSED CHART DATA ---
+
+    // 1. Category Data (Donut)
+    const categoryData = useMemo(() => {
+        if (!allExpenses.length) return [];
+
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+
+        // Calculate Last Month correctly handling Jan -> Dec rollback
+        const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastMonthIdx = lastMonthDate.getMonth();
+        const lastMonthYear = lastMonthDate.getFullYear();
+
+        let filtered = allExpenses;
+
+        if (categoryFilter === 'this_month') {
+            filtered = allExpenses.filter(e => {
+                const d = new Date(e.expense_date);
+                return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+            });
+
+            // Fallback Logic: If no data for this month, default to ALL (as requested)
+            if (filtered.length === 0) {
+                // Check if we should fallback visually or just show empty. 
+                // Request said "if no data use all time as default". 
+                // We'll override the filtered set to ALL, but keep the filter state as 'this_month' in UI.
+                filtered = allExpenses;
+            }
+        } else if (categoryFilter === 'last_month') {
+            filtered = allExpenses.filter(e => {
+                const d = new Date(e.expense_date);
+                return d.getMonth() === lastMonthIdx && d.getFullYear() === lastMonthYear;
+            });
+        }
+
+        const grouped: { [key: string]: number } = {};
+        filtered.forEach(e => {
+            grouped[e.category] = (grouped[e.category] || 0) + e.amount;
+        });
+
+        return Object.keys(grouped).map(key => ({
+            name: key,
+            value: grouped[key],
+            color: CATEGORY_COLORS[key] || CATEGORY_COLORS["Other"]
+        }));
+    }, [allExpenses, categoryFilter]);
+
+
+    // 2. Trend Data (Area Chart)
+    const dailyTrendData = useMemo(() => {
+        return allExpenses.map(e => ({
+            date: e.expense_date,
+            amount: e.amount
+        }));
+    }, [allExpenses]);
+
 
     if (loading) return <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
 
@@ -97,14 +191,18 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
     const isSpendingUp = trendDiff > 0;
     const TrendIcon = isSpendingUp ? ArrowUp : ArrowDown;
 
-    const monthlyChartData = stats.chartData.monthly;
-    const finalCategoryData = Object.keys(stats.chartData.category).map(key => ({
-        name: key, value: stats.chartData.category[key], color: CATEGORY_COLORS[key] || CATEGORY_COLORS["Other"]
-    }));
-
     return (
         <TooltipProvider>
-            <div className="space-y-4">
+            <div className={`space-y-4 transition-opacity duration-500 ${usingCachedData ? 'opacity-90' : 'opacity-100'}`}>
+
+                {usingCachedData && (
+                    <div className="flex justify-end px-1">
+                        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full flex items-center gap-1 border border-amber-100">
+                            <CloudOff className="w-3 h-3" /> Offline Mode
+                        </span>
+                    </div>
+                )}
+
                 {/* STATS GRID */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* CARD 1: BALANCE */}
@@ -159,7 +257,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         </CardContent>
                     </Card>
 
-                    {/* CARD 4: GOALS - UPDATED COLOR LOGIC */}
+                    {/* CARD 4: GOALS */}
                     <Card className="rounded-2xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-purple-200">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-1 relative z-10">
                             <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Goals</CardTitle>
@@ -169,13 +267,11 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         </CardHeader>
                         <CardContent className="p-4 pt-1 relative z-10">
                             <div className="flex justify-between items-end mb-1.5">
-                                {/* TEXT COLOR UPDATED */}
                                 <div className={`text-2xl font-bold tracking-tight ${getProgressTextColor(wishlistProgress)}`}>
                                     {Math.round(wishlistProgress)}%
                                 </div>
                                 <span className="text-[10px] text-slate-400 mb-1 font-medium">{formatMoney(stats.wishlistSaved)}</span>
                             </div>
-                            {/* BAR COLOR UPDATED - Track is neutral (bg-slate-100), Indicator is colored */}
                             <Progress
                                 value={wishlistProgress}
                                 className="h-1.5 bg-slate-100"
@@ -188,21 +284,31 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                 {/* CHARTS */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
                     <Card className="rounded-2xl border border-slate-100 p-5 hover:shadow-sm transition-all bg-white">
-                        <CardTitle className="text-xs font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-wider">
-                            <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> Expense Breakdown
-                        </CardTitle>
+                        <div className="flex items-center justify-between mb-4">
+                            <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> Expense Breakdown
+                            </CardTitle>
+
+                            {/* CATEGORY FILTER UI */}
+                            <Select value={categoryFilter} onValueChange={(v: any) => setCategoryFilter(v)}>
+                                <SelectTrigger className="h-7 text-[10px] w-[100px] bg-slate-50 border-slate-200 rounded-lg">
+                                    <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="this_month">This Month</SelectItem>
+                                    <SelectItem value="last_month">Last Month</SelectItem>
+                                    <SelectItem value="all">All Time</SelectItem>
+                                </SelectContent>
+                            </Select>
+                        </div>
                         <div className="w-full">
-                            <CategoryDonutChart data={finalCategoryData} currencySymbol={currencySymbol} />
+                            <CategoryDonutChart data={categoryData} currencySymbol={currencySymbol} />
                         </div>
                     </Card>
 
                     <Card className="lg:col-span-2 rounded-2xl border border-slate-100 p-5 hover:shadow-sm transition-all bg-white">
-                        <CardTitle className="text-xs font-bold text-slate-500 mb-4 flex items-center gap-2 uppercase tracking-wider">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Spending Trend
-                        </CardTitle>
-                        <div className="w-full">
-                            <MonthlyTrendChart data={monthlyChartData} currencySymbol={currencySymbol} />
-                        </div>
+                        {/* Note: MonthlyTrendChart handles its own internal filtering state */}
+                        <MonthlyTrendChart rawData={dailyTrendData} currencySymbol={currencySymbol} />
                     </Card>
                 </div>
             </div>
