@@ -155,20 +155,29 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         try {
             await supabase.auth.updateUser({ data: { full_name: displayName, avatar_url: avatarUrl } });
 
-            const { error } = await supabase.from('profiles').update({
+            // ⚡ FIX: Fallback Logic. Try Update, if 0 rows, try Insert.
+            const { data, error } = await supabase.from('profiles').update({
                 full_name: displayName,
                 avatar_url: avatarUrl,
-            }).eq('id', user.id);
+            }).eq('id', user.id).select();
 
             if (error) throw error;
+
+            if (!data || data.length === 0) {
+                // Profile didn't exist (e.g. page.tsx failed), so we insert it now
+                await supabase.from('profiles').insert({
+                    id: user.id,
+                    full_name: displayName,
+                    avatar_url: avatarUrl,
+                    email: user.email,
+                    username: user.email?.split('@')[0]
+                });
+            }
+
             onHouseholdCreated(user);
         } catch (e: any) {
-            if (e.code === 'PGRST116' || e.message?.includes('not found')) {
-                await supabase.from('profiles').insert({ id: user.id, full_name: displayName, avatar_url: avatarUrl, email: user.email });
-                onHouseholdCreated(user);
-            } else {
-                alert("Profile error: " + e.message);
-            }
+            console.error(e);
+            alert("Profile save failed: " + e.message);
         } finally { setLoading(false); }
     };
 

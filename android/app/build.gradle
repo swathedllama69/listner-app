@@ -2,7 +2,7 @@ apply plugin: 'com.android.application'
 
 android {
     namespace "com.listner.app"
-    compileSdk rootProject.ext.compileSdkVersion
+    compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.listner.app"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -23,7 +23,7 @@ android {
         }
     }
 
-    // ⚡ ADDED: Fix for Android 15 (16KB Page Size) Compatibility
+    // ⚡ FIX for Android 15 (16KB Page Size) Compatibility
     packagingOptions {
         jniLibs {
             useLegacyPackaging = true
@@ -47,7 +47,7 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
-    implementation "com.airbnb.android:lottie:6.1.0"
+    implementation "com.airbnb.android:lottie:6.7.1"
 
 }
 
@@ -58,6 +58,6 @@ try {
     if (servicesJSON.text) {
         apply plugin: 'com.google.gms.google-services'
     }
-} catch(Exception e) {
-    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+} catch(Exception ignored) {
+    logger.info("google-services.json not found...")
 }

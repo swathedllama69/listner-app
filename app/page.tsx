@@ -128,7 +128,12 @@ function AuthWrapper() {
       let username = currentUser.email?.split('@')[0] || 'user';
       if (username.length < 3) username = username + '_user';
 
-      let { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', currentUser.id).single();
+      // ⚡ FIX: Use .maybeSingle() instead of .single() to prevent 406 Error
+      let { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', currentUser.id)
+        .maybeSingle();
 
       if (!profile) {
         const { data: newProfile, error: createError } = await supabase.from('profiles').upsert({
@@ -501,11 +506,9 @@ function AuthPage() {
         @keyframes slowDrift15 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 35% { transform: translate(-15vw, 10vh) rotate(-10deg); } }
       `}</style>
       <div className="absolute inset-0 z-0">
-        {/* ⚡ REPLACED HEAVY BLOBS WITH STATIC GRADIENT FOR PERFORMANCE */}
         <div className="absolute inset-0 bg-gradient-to-br from-teal-50 via-white to-indigo-50 opacity-80"></div>
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-5"></div>
 
-        {/* ⚡ FLOATING ITEMS PRESERVED */}
         {animationItems.map((item, index) => {
           const sizeInPixels = item.size * (item.isEmoji ? 6 : 4.5);
           const IconComponent = item.Icon;
@@ -518,7 +521,6 @@ function AuthPage() {
       </div>
 
       <div className="relative z-10 w-full flex flex-col lg:flex-row">
-        {/* DESKTOP SIDE PANEL */}
         <div className="hidden lg:flex w-1/2 h-screen flex-col justify-between p-16 text-slate-800 bg-slate-100/50">
           <div className="flex items-center gap-4">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-32 h-32 object-contain" />
@@ -539,7 +541,6 @@ function AuthPage() {
           <div className="text-xs text-slate-400">© 2025 ListNer Inc.</div>
         </div>
 
-        {/* MOBILE / FORM CONTAINER */}
         <div className="w-full lg:w-1/2 h-full flex flex-col items-center justify-center p-6">
           <div className="lg:hidden mb-8 flex flex-col items-center">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-16 h-16 mb-4 object-contain" />
