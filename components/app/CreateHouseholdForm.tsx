@@ -6,11 +6,10 @@ import { User } from "@supabase/supabase-js"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Loader2, Home, Users, ArrowRight, Camera, User as UserIcon, CheckCircle2 } from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Card } from "@/components/ui/card"
+import { Loader2, Home, Users, ArrowRight, Camera, User as UserIcon, CheckCircle2, ChevronLeft, Plus, Sparkles } from "lucide-react"
 
-// Helper for image compression (Reused)
+// Helper: Compress Image
 const compressImage = (file: File): Promise<File> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
@@ -34,17 +33,16 @@ const compressImage = (file: File): Promise<File> => {
 }
 
 export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, onHouseholdCreated: (user: User) => void }) {
-    // STEP 1: Household | STEP 2: Profile
-    const [step, setStep] = useState<1 | 2>(1);
+    // STATE MACHINE: 'choice' -> 'create_input' | 'join_input' -> 'profile'
+    const [view, setView] = useState<'choice' | 'create_input' | 'join_input' | 'profile'>('choice');
 
     // Step 1 State
     const [loading, setLoading] = useState(false)
-    const [mode, setMode] = useState<'create' | 'join'>('create')
     const [name, setName] = useState("")
     const [inviteCode, setInviteCode] = useState("")
     const [error, setError] = useState<string | null>(null)
 
-    // Step 2 State
+    // Step 2 State (Profile)
     const [displayName, setDisplayName] = useState(user.user_metadata?.full_name || "");
     const [avatarUrl, setAvatarUrl] = useState(user.user_metadata?.avatar_url || "");
     const [uploading, setUploading] = useState(false);
@@ -54,14 +52,15 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
     const handleHouseholdSubmit = async () => {
         setLoading(true); setError(null);
         try {
-            if (mode === 'create') {
+            if (view === 'create_input') {
                 const { data: hh, error: hhError } = await supabase.from('households').insert({
                     name: name,
-                    currency: 'NGN', // Default, can be changed in settings
+                    currency: 'NGN',
                     country: 'Nigeria'
                 }).select().single();
                 if (hhError) throw hhError;
 
+                // Owner link
                 const { error: memError } = await supabase.from('household_members').insert({
                     user_id: user.id,
                     household_id: hh.id,
@@ -71,21 +70,25 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 if (memError) throw memError;
             } else {
                 // Join Logic
-                const { data: hh, error: fetchError } = await supabase.from('households').select('id').eq('invite_code', inviteCode.toUpperCase()).single();
+                const { data: hh, error: fetchError } = await supabase.from('households').select('id').eq('invite_code', inviteCode.trim().toUpperCase()).single();
                 if (fetchError || !hh) throw new Error("Invalid invite code");
 
-                const { error: joinError } = await supabase.from('household_members').insert({
-                    user_id: user.id,
-                    household_id: hh.id,
-                    is_owner: false,
-                    role: 'member'
-                });
-                if (joinError) throw joinError;
+                // Check if already a member to prevent duplicate key error
+                const { data: existing } = await supabase.from('household_members').select('id').eq('user_id', user.id).eq('household_id', hh.id).maybeSingle();
+                if (!existing) {
+                    const { error: joinError } = await supabase.from('household_members').insert({
+                        user_id: user.id,
+                        household_id: hh.id,
+                        is_owner: false,
+                        role: 'member'
+                    });
+                    if (joinError) throw joinError;
+                }
             }
-            // Move to Step 2
-            setStep(2);
+            setView('profile'); // Success -> Move to Profile
         } catch (err: any) {
-            setError(err.message);
+            console.error(err);
+            setError(err.message || "Something went wrong.");
         } finally {
             setLoading(false);
         }
@@ -98,126 +101,219 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         try {
             const compressed = await compressImage(file);
             const path = `${user.id}/avatar-${Date.now()}.jpg`;
-            await supabase.storage.from('images').upload(path, compressed);
+
+            // Upload to Supabase Storage
+            const { error: uploadError } = await supabase.storage.from('images').upload(path, compressed);
+            if (uploadError) throw uploadError;
+
+            // Get Public URL
             const { data } = supabase.storage.from('images').getPublicUrl(path);
             setAvatarUrl(data.publicUrl);
-        } catch (e) { console.error(e); } finally { setUploading(false); }
+        } catch (e: any) {
+            console.error(e);
+            alert("Image upload failed: " + e.message);
+        } finally {
+            setUploading(false);
+        }
     };
 
     const handleProfileSubmit = async () => {
         setLoading(true);
         try {
+            // Update Auth Metadata (optional but good for syncing)
             await supabase.auth.updateUser({
                 data: { full_name: displayName, avatar_url: avatarUrl }
             });
-            await supabase.from('profiles').upsert({
-                id: user.id,
+
+            // ⚡ FIX: Use UPDATE instead of UPSERT
+            // This prevents "username" constraint errors since we only update name/photo
+            const { error } = await supabase.from('profiles').update({
                 full_name: displayName,
                 avatar_url: avatarUrl,
-                email: user.email
-            });
-            // Complete
-            onHouseholdCreated(user);
-        } catch (e) { console.error(e); } finally { setLoading(false); }
+            }).eq('id', user.id);
+
+            if (error) throw error;
+
+            onHouseholdCreated(user); // DONE!
+        } catch (e: any) {
+            console.error(e);
+            // Fallback: If row doesn't exist (rare), try insert without username
+            if (e.code === 'PGRST116' || e.message?.includes('not found')) {
+                await supabase.from('profiles').insert({
+                    id: user.id,
+                    full_name: displayName,
+                    avatar_url: avatarUrl,
+                    email: user.email
+                });
+                onHouseholdCreated(user);
+            } else {
+                alert("Profile save failed: " + e.message);
+            }
+        } finally {
+            setLoading(false);
+        }
     };
 
-    // --- RENDER ---
+    // --- RENDER VIEWS ---
 
-    if (step === 1) {
+    // 1. SELECTION SCREEN (Clean Cards)
+    if (view === 'choice') {
         return (
-            <div className="flex flex-col items-center justify-center p-6 min-h-screen bg-slate-50 animate-in fade-in">
-                <div className="text-center mb-8">
-                    <div className="w-16 h-16 bg-white rounded-2xl shadow-sm border border-slate-100 flex items-center justify-center mx-auto mb-4">
-                        <Home className="w-8 h-8 text-indigo-600" />
-                    </div>
-                    <h1 className="text-2xl font-bold text-slate-900">Setup your space</h1>
-                    <p className="text-slate-500 mt-2 max-w-xs mx-auto">Create a new digital home or join an existing one.</p>
+            <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 animate-in fade-in duration-500">
+                <div className="text-center mb-8 space-y-2">
+                    <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Setup your space</h1>
+                    <p className="text-slate-500 text-sm">How would you like to start?</p>
                 </div>
 
-                <Card className="w-full max-w-md border-none shadow-xl bg-white rounded-3xl overflow-hidden">
-                    <CardContent className="p-0">
-                        <Tabs value={mode} onValueChange={(v) => { setMode(v as any); setError(null); }} className="w-full">
-                            <TabsList className="grid w-full grid-cols-2 p-0 bg-slate-100 h-14">
-                                <TabsTrigger value="create" className="h-full rounded-none data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-indigo-600 data-[state=active]:text-indigo-700 font-medium">Create New</TabsTrigger>
-                                <TabsTrigger value="join" className="h-full rounded-none data-[state=active]:bg-white data-[state=active]:border-b-2 data-[state=active]:border-indigo-600 data-[state=active]:text-indigo-700 font-medium">Join Existing</TabsTrigger>
-                            </TabsList>
-                            <div className="p-8 space-y-6">
-                                {mode === 'create' ? (
-                                    <div className="space-y-4 animate-in slide-in-from-left-4 fade-in">
-                                        <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex gap-3">
-                                            <Home className="w-5 h-5 text-indigo-600 shrink-0 mt-0.5" />
-                                            <div className="text-xs text-indigo-800 leading-relaxed">
-                                                <strong>Start fresh.</strong> Create a space for your household. You can invite members later.
-                                            </div>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Name your household</Label>
-                                            <Input placeholder="e.g. My Family, The Smiths" value={name} onChange={e => setName(e.target.value)} className="h-12 bg-slate-50 border-slate-200" />
-                                        </div>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4 animate-in slide-in-from-right-4 fade-in">
-                                        <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 flex gap-3">
-                                            <Users className="w-5 h-5 text-purple-600 shrink-0 mt-0.5" />
-                                            <div className="text-xs text-purple-800 leading-relaxed">
-                                                <strong>Sync up.</strong> Join a member to sync lists. You can still create private lists or share specific ones within the household.
-                                            </div>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Enter Invite Code</Label>
-                                            <Input placeholder="e.g. A1B2C3" value={inviteCode} onChange={e => setInviteCode(e.target.value)} className="h-12 bg-slate-50 border-slate-200 uppercase tracking-widest font-mono text-center text-lg" maxLength={6} />
-                                        </div>
-                                    </div>
-                                )}
+                <div className="grid gap-4 w-full max-w-sm">
+                    <button
+                        onClick={() => setView('create_input')}
+                        className="group relative flex items-center p-5 bg-white border-2 border-slate-100 rounded-3xl hover:border-indigo-600 hover:shadow-xl hover:shadow-indigo-100 transition-all duration-300 text-left"
+                    >
+                        <div className="h-12 w-12 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
+                            <Plus className="w-6 h-6" />
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="font-bold text-slate-900">Create New</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">Start a fresh household.</p>
+                        </div>
+                        <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all" />
+                    </button>
 
-                                {error && <div className="text-xs text-rose-600 bg-rose-50 p-3 rounded-lg flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-rose-500" /> {error}</div>}
-
-                                <Button onClick={handleHouseholdSubmit} disabled={loading || (mode === 'create' ? !name : !inviteCode)} className="w-full h-12 bg-slate-900 hover:bg-slate-800 text-base font-bold rounded-xl">
-                                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : (mode === 'create' ? "Create Household" : "Join Household")}
-                                </Button>
-                            </div>
-                        </Tabs>
-                    </CardContent>
-                </Card>
+                    <button
+                        onClick={() => setView('join_input')}
+                        className="group relative flex items-center p-5 bg-white border-2 border-slate-100 rounded-3xl hover:border-purple-600 hover:shadow-xl hover:shadow-purple-100 transition-all duration-300 text-left"
+                    >
+                        <div className="h-12 w-12 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center mr-4 group-hover:scale-110 transition-transform">
+                            <Users className="w-6 h-6" />
+                        </div>
+                        <div className="flex-1">
+                            <h3 className="font-bold text-slate-900">Join Existing</h3>
+                            <p className="text-xs text-slate-500 mt-0.5">I have an invite code.</p>
+                        </div>
+                        <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-purple-600 group-hover:translate-x-1 transition-all" />
+                    </button>
+                </div>
             </div>
         );
     }
 
-    // STEP 2: PROFILE
+    // 2. INPUT SCREENS (Create or Join)
+    if (view === 'create_input' || view === 'join_input') {
+        const isCreate = view === 'create_input';
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 animate-in slide-in-from-right-8 duration-300">
+                <Card className="w-full max-w-sm border-none shadow-xl bg-white rounded-[2rem] p-8 relative overflow-hidden">
+                    {/* Back Button */}
+                    <button onClick={() => { setView('choice'); setError(null); }} className="absolute top-6 left-6 text-slate-400 hover:text-slate-600 p-2 -ml-2 rounded-full hover:bg-slate-50 transition-colors">
+                        <ChevronLeft className="w-6 h-6" />
+                    </button>
+
+                    <div className="mt-8 text-center space-y-6">
+                        <div className={`w-16 h-16 rounded-3xl mx-auto flex items-center justify-center mb-6 shadow-sm ${isCreate ? 'bg-indigo-100 text-indigo-600' : 'bg-purple-100 text-purple-600'}`}>
+                            {isCreate ? <Home className="w-8 h-8" /> : <Sparkles className="w-8 h-8" />}
+                        </div>
+
+                        <div className="space-y-2">
+                            <h2 className="text-2xl font-bold text-slate-900">{isCreate ? "Name your space" : "Enter Invite Code"}</h2>
+                            <p className="text-sm text-slate-500">
+                                {isCreate ? "e.g. My Apartment, The Smiths" : "Ask the owner for the 6-digit code."}
+                            </p>
+                        </div>
+
+                        <div className="space-y-4 pt-2">
+                            {isCreate ? (
+                                <Input
+                                    autoFocus
+                                    placeholder="Household Name"
+                                    value={name}
+                                    onChange={e => setName(e.target.value)}
+                                    className="h-14 text-lg bg-slate-50 border-slate-200 rounded-2xl text-center focus:ring-2 focus:ring-indigo-500"
+                                />
+                            ) : (
+                                <Input
+                                    autoFocus
+                                    placeholder="A1B2C3"
+                                    value={inviteCode}
+                                    onChange={e => setInviteCode(e.target.value)}
+                                    className="h-14 text-2xl font-mono tracking-[0.5em] uppercase bg-slate-50 border-slate-200 rounded-2xl text-center focus:ring-2 focus:ring-purple-500"
+                                    maxLength={6}
+                                />
+                            )}
+
+                            {error && (
+                                <div className="text-xs font-bold text-rose-500 bg-rose-50 p-3 rounded-xl animate-in shake">
+                                    {error}
+                                </div>
+                            )}
+
+                            <Button
+                                onClick={handleHouseholdSubmit}
+                                disabled={loading || (isCreate ? !name.trim() : inviteCode.length < 3)}
+                                className={`w-full h-12 text-base font-bold rounded-xl shadow-lg transition-transform active:scale-95 ${isCreate ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200' : 'bg-purple-600 hover:bg-purple-700 shadow-purple-200'}`}
+                            >
+                                {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Continue"}
+                            </Button>
+                        </div>
+                    </div>
+                </Card>
+            </div>
+        )
+    }
+
+    // 3. PROFILE SETUP (Final Step)
     return (
-        <div className="flex flex-col items-center justify-center p-6 min-h-screen bg-slate-50 animate-in slide-in-from-right-8 duration-500">
+        <div className="flex flex-col items-center justify-center p-6 min-h-screen bg-slate-50 animate-in zoom-in-95 duration-500">
             <div className="text-center mb-8">
                 <h1 className="text-2xl font-bold text-slate-900">One last thing</h1>
-                <p className="text-slate-500 mt-2">Set up your profile so others know it's you.</p>
+                <p className="text-slate-500 mt-2 text-sm">Add a photo so others know it's you.</p>
             </div>
 
-            <Card className="w-full max-w-md border-none shadow-xl bg-white rounded-3xl p-8 space-y-8">
+            <Card className="w-full max-w-sm border-none shadow-2xl bg-white rounded-[2rem] p-8 space-y-8">
                 {/* Image Upload */}
                 <div className="flex justify-center">
                     <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                        <div className="h-32 w-32 rounded-full bg-slate-100 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center">
-                            {avatarUrl ? <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <UserIcon className="w-12 h-12 text-slate-300" />}
-                            {uploading && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><Loader2 className="w-8 h-8 text-white animate-spin" /></div>}
+                        <div className="h-32 w-32 rounded-full bg-slate-50 border-4 border-white shadow-xl overflow-hidden flex items-center justify-center transition-all group-hover:scale-105">
+                            {avatarUrl ? (
+                                <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                            ) : (
+                                <UserIcon className="w-12 h-12 text-slate-300" />
+                            )}
+
+                            {/* Overlay when uploading */}
+                            {uploading && (
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm">
+                                    <Loader2 className="w-8 h-8 text-white animate-spin" />
+                                </div>
+                            )}
                         </div>
-                        <div className="absolute bottom-1 right-1 bg-indigo-600 text-white p-2 rounded-full border-4 border-white shadow-sm"><Camera className="w-4 h-4" /></div>
+                        <div className="absolute bottom-1 right-1 bg-slate-900 text-white p-2.5 rounded-full border-4 border-white shadow-lg group-hover:bg-indigo-600 transition-colors">
+                            <Camera className="w-5 h-5" />
+                        </div>
                     </div>
                     <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} />
                 </div>
 
                 {/* Name Input */}
-                <div className="space-y-2">
-                    <Label>Display Name</Label>
-                    <Input
-                        placeholder="What should we call you?"
-                        value={displayName}
-                        onChange={e => setDisplayName(e.target.value)}
-                        className="h-12 bg-slate-50 border-slate-200 text-center text-lg"
-                    />
-                </div>
+                <div className="space-y-4">
+                    <div className="space-y-2 text-center">
+                        <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Display Name</Label>
+                        <Input
+                            placeholder="e.g. John"
+                            value={displayName}
+                            onChange={e => setDisplayName(e.target.value)}
+                            className="h-14 bg-slate-50 border-slate-200 text-center text-lg font-bold rounded-2xl focus:bg-white transition-all"
+                        />
+                    </div>
 
-                <Button onClick={handleProfileSubmit} disabled={loading || !displayName} className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white text-base font-bold rounded-xl shadow-lg shadow-indigo-200">
-                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : "Looks Good!"} <CheckCircle2 className="w-5 h-5 ml-2" />
-                </Button>
+                    <Button
+                        onClick={handleProfileSubmit}
+                        disabled={loading || !displayName.trim()}
+                        className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white text-lg font-bold rounded-2xl shadow-xl shadow-slate-200 transition-all active:scale-95"
+                    >
+                        {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <span className="flex items-center gap-2">All Set <CheckCircle2 className="w-5 h-5" /></span>}
+                    </Button>
+                </div>
             </Card>
         </div>
     );

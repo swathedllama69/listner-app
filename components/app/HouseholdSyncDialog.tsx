@@ -6,9 +6,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { UserPlus, Copy, Share2, Loader2, AlertTriangle, CheckCircle2 } from "lucide-react"
+import { UserPlus, Copy, Share2, Loader2, AlertTriangle, CheckCircle2, QrCode } from "lucide-react"
 import { Capacitor } from "@capacitor/core"
 import { Share } from '@capacitor/share'
+import { QRCodeSVG } from 'qrcode.react'
+import { BarcodeScanner, BarcodeFormat } from '@capacitor-mlkit/barcode-scanning'
 
 export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId, onJoinSuccess }: {
     isOpen: boolean,
@@ -26,7 +28,6 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
     // TAB 1: GENERATE INVITE
     const handleGenerateInvite = async () => {
         setLoading(true)
-        // RPC call to generate a unique code for the household
         const { data, error } = await supabase.rpc('create_invite_code', { target_household_id: householdId })
         setLoading(false)
         if (!error) setInviteCode(data)
@@ -36,7 +37,7 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
     const handleShare = async () => {
         if (!inviteCode) return;
         const message = `Join my household on ListNer with code: ${inviteCode}`;
-        const url = 'https://listner.site'; // Update with your actual landing page or deep link
+        const url = 'https://listner.site';
 
         try {
             if (Capacitor.isNativePlatform()) {
@@ -49,7 +50,6 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
             } else if (navigator.share) {
                 await navigator.share({ title: 'ListNer Invite', text: message, url });
             } else {
-                // Fallback to copy if share API not supported
                 await navigator.clipboard.writeText(`${message} ${url}`);
                 alert("Invite copied to clipboard!");
             }
@@ -58,15 +58,57 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
         }
     };
 
+    // ⚡ UPDATED: LAZY PERMISSION SCAN LOGIC
+    const handleScan = async () => {
+        if (!Capacitor.isNativePlatform()) {
+            alert("Scanning is only supported on the mobile app.");
+            return;
+        }
+
+        try {
+            // 1. Check status first (Does not prompt user)
+            const { camera } = await BarcodeScanner.checkPermissions();
+
+            // 2. Only Request if NOT already granted
+            if (camera !== 'granted' && camera !== 'limited') {
+                const result = await BarcodeScanner.requestPermissions();
+                if (result.camera !== 'granted' && result.camera !== 'limited') {
+                    alert("Camera access is needed to scan the QR code.");
+                    return;
+                }
+            }
+
+            // 3. Start Scan (Permission is guaranteed now)
+            const { barcodes } = await BarcodeScanner.scan({
+                formats: [BarcodeFormat.QrCode],
+            });
+
+            if (barcodes.length > 0 && barcodes[0].rawValue) {
+                const scanned = barcodes[0].rawValue;
+                setJoinCode(scanned);
+                handlePreview(scanned); // Auto-submit
+            }
+        } catch (e: any) {
+            // Handle "Google Barcode Scanner Module not yet downloaded" error silently or via toast
+            if (e.message?.includes('module_not_found')) {
+                alert("Scanner module is downloading... please try again in a moment.");
+            } else {
+                console.error("Scanner error:", e);
+            }
+        }
+    };
+
     // TAB 2: JOIN FLOW
-    const handlePreview = async () => {
-        if (!joinCode.trim()) return;
+    const handlePreview = async (codeOverride?: string) => {
+        const codeToUse = codeOverride || joinCode;
+        if (!codeToUse.trim()) return;
+
         setLoading(true);
         try {
             const { data, error } = await supabase
                 .from('households')
                 .select('name')
-                .eq('invite_code', joinCode.trim().toUpperCase())
+                .eq('invite_code', codeToUse.trim().toUpperCase())
                 .single();
 
             if (data) {
@@ -91,7 +133,7 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
             if (error) throw error;
 
             onOpenChange(false);
-            onJoinSuccess(); // Triggers reload
+            onJoinSuccess();
         } catch (err: any) {
             console.error(err.message);
             alert("Failed to join. Please try again.");
@@ -118,16 +160,21 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
                     <TabsContent value="invite" className="space-y-4">
                         <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-sm text-indigo-800 leading-relaxed">
                             <p className="font-semibold mb-1 flex items-center gap-2"><UserPlus className="w-4 h-4" /> Invite a User</p>
-                            Share this code with the person you want to add. They will gain access to shared lists and finances.
+                            Share this code or let them scan it to join your household.
                         </div>
 
                         <div className="py-2 text-center">
                             {inviteCode ? (
                                 <div className="space-y-4 animate-in zoom-in-95">
-                                    <div className="p-5 bg-slate-900 rounded-xl text-white shadow-lg relative overflow-hidden group">
-                                        <div className="absolute top-0 right-0 p-2 opacity-50"><Share2 className="w-12 h-12 text-slate-700" /></div>
-                                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2">Your Code</p>
-                                        <p className="text-4xl font-mono font-bold tracking-widest text-lime-400 select-all">{inviteCode}</p>
+                                    <div className="p-5 bg-slate-900 rounded-xl text-white shadow-lg relative overflow-hidden group flex flex-col items-center">
+                                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Scan to Join</p>
+
+                                        {/* QR CODE */}
+                                        <div className="bg-white p-2 rounded-lg mb-4">
+                                            <QRCodeSVG value={inviteCode} size={140} />
+                                        </div>
+
+                                        <p className="text-2xl font-mono font-bold tracking-widest text-lime-400 select-all">{inviteCode}</p>
                                     </div>
 
                                     <Button onClick={handleShare} className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-md shadow-indigo-100">
@@ -154,16 +201,22 @@ export function HouseholdSyncDialog({ isOpen, onOpenChange, householdId, userId,
                         {step === 'input' ? (
                             <div className="space-y-4 pt-2">
                                 <div className="space-y-2">
-                                    <Input
-                                        placeholder="Enter Code (e.g. A8X9Z)"
-                                        value={joinCode}
-                                        onChange={e => setJoinCode(e.target.value)}
-                                        className="text-center text-xl tracking-[0.5em] font-mono uppercase h-14 rounded-xl border-2 focus:border-indigo-500 transition-all"
-                                        maxLength={6}
-                                    />
-                                    <p className="text-xs text-center text-slate-400">Ask the household owner for their invite code.</p>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            placeholder="Enter Code"
+                                            value={joinCode}
+                                            onChange={e => setJoinCode(e.target.value)}
+                                            className="text-center text-xl tracking-[0.2em] font-mono uppercase h-14 rounded-xl border-2 focus:border-indigo-500 transition-all flex-1"
+                                            maxLength={6}
+                                        />
+                                        {/* SCAN BUTTON */}
+                                        <Button onClick={handleScan} className="h-14 w-14 rounded-xl bg-slate-100 text-slate-900 hover:bg-slate-200 border-2 border-slate-200 shrink-0" title="Scan QR Code">
+                                            <QrCode className="w-6 h-6" />
+                                        </Button>
+                                    </div>
+                                    <p className="text-xs text-center text-slate-400">Enter code or scan QR from owner's phone.</p>
                                 </div>
-                                <Button onClick={handlePreview} disabled={loading || joinCode.length < 3} className="w-full h-12 bg-slate-900 text-white font-bold rounded-xl">
+                                <Button onClick={() => handlePreview()} disabled={loading || joinCode.length < 3} className="w-full h-12 bg-slate-900 text-white font-bold rounded-xl">
                                     {loading ? "Checking..." : "Preview Household"}
                                 </Button>
                             </div>
