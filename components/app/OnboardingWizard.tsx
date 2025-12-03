@@ -1,20 +1,20 @@
 "use client"
 
-import { useState, useRef, FormEvent } from "react"
+import { useState, useRef } from "react"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Household } from "@/lib/types"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { User as UserIcon, Camera, ArrowRight, CheckCircle2, Globe, Loader2, Sparkles } from "lucide-react"
+import { User as UserIcon, Camera, ArrowRight, CheckCircle2, Globe, Loader2, MapPin } from "lucide-react"
 import { CURRENCIES, COUNTRIES } from "@/lib/constants"
 
 /* eslint-disable @next/next/no-img-element */
 
-// Native Image Compression
+// Native Image Compression Helper
 const compressImage = (file: File): Promise<File> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
@@ -34,7 +34,7 @@ const compressImage = (file: File): Promise<File> => {
                 resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
             }, 'image/jpeg', 0.7);
         };
-        img.onerror = (error) => reject(error);
+        img.onerror = reject;
     });
 }
 
@@ -42,143 +42,170 @@ export function OnboardingWizard({ user, household, onComplete }: { user: User, 
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
 
-    // State
+    // Profile State
     const [name, setName] = useState(user.user_metadata?.full_name || "");
     const [avatarUrl, setAvatarUrl] = useState(user.user_metadata?.avatar_url || "");
+
+    // Household State
     const [country, setCountry] = useState(household.country || "Nigeria");
     const [currency, setCurrency] = useState(household.currency || "NGN");
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Handle Avatar
     const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
+        const file = e.target.files?.[0]; if (!file) return;
         setLoading(true);
         try {
             const compressed = await compressImage(file);
-            const fileExt = file.name.split('.').pop();
-            const fileName = `avatar-${Date.now()}.${fileExt}`;
-            const filePath = `${user.id}/${fileName}`;
-            const { error: uploadError } = await supabase.storage.from('images').upload(filePath, compressed);
-            if (uploadError) throw uploadError;
-            const { data: { publicUrl } } = supabase.storage.from('images').getPublicUrl(filePath);
-            setAvatarUrl(publicUrl);
+            const fileName = `avatar-${user.id}-${Date.now()}.jpg`;
+            const { error } = await supabase.storage.from('images').upload(`${user.id}/${fileName}`, compressed);
+            if (error) throw error;
+            const { data } = supabase.storage.from('images').getPublicUrl(`${user.id}/${fileName}`);
+            setAvatarUrl(data.publicUrl);
         } catch (error: any) {
-            alert("Upload failed: " + error.message);
+            console.error("Upload failed", error);
+            // Optionally show toast error here
         } finally {
             setLoading(false);
         }
     };
 
-    // Save Step 1 (Profile)
     const saveProfile = async () => {
-        if (!name.trim()) return alert("Please enter your name.");
+        if (!name.trim()) return; // Prevent empty name
         setLoading(true);
-        const { error } = await supabase.auth.updateUser({ data: { full_name: name, avatar_url: avatarUrl } });
+
+        // Update Auth Metadata AND Profile Table
+        await supabase.auth.updateUser({ data: { full_name: name, avatar_url: avatarUrl } });
+        await supabase.from('profiles').update({ full_name: name, avatar_url: avatarUrl }).eq('id', user.id);
+
         setLoading(false);
-        if (error) alert(error.message);
-        else setStep(2);
+        setStep(2);
     };
 
-    // Save Step 2 (Household) & Finish
     const saveHousehold = async () => {
         setLoading(true);
-        // 1. Update Household
-        const { error: hhError } = await supabase.from('households').update({ country, currency }).eq('id', household.id);
-        if (hhError) { setLoading(false); return alert(hhError.message); }
 
-        // 2. Mark Complete
-        const { error: userError } = await supabase.auth.updateUser({ data: { onboarding_complete: true } });
+        // Update Household Settings
+        await supabase.from('households').update({ country, currency }).eq('id', household.id);
+
+        // Mark Onboarding as Complete
+        await supabase.auth.updateUser({ data: { onboarding_complete: true } });
+
         setLoading(false);
-        if (userError) alert(userError.message);
-        else onComplete();
+        onComplete();
     };
 
     const handleCountryChange = (c: string) => {
         setCountry(c);
+        // Smart Currency Match: If country selected, auto-select currency
         const match = CURRENCIES.find(curr => c.toUpperCase().includes(curr.name.toUpperCase().split(' ')[1] || 'XYZ'));
         if (match) setCurrency(match.code);
     }
 
     return (
         <Dialog open={true}>
-            <DialogContent className="sm:max-w-md rounded-3xl border-none shadow-2xl p-0 overflow-hidden bg-white">
-                {/* Header Graphic */}
-                <div className="h-32 bg-gradient-to-br from-teal-900 to-emerald-800 flex items-center justify-center relative">
+            <DialogContent
+                className="sm:max-w-md rounded-[32px] border-none shadow-2xl p-0 overflow-hidden bg-white gap-0"
+                onPointerDownOutside={(e) => e.preventDefault()}
+                onEscapeKeyDown={(e) => e.preventDefault()}
+            >
+
+                {/* Visual Header with Animated Gradient */}
+                <div className="h-32 bg-gradient-to-br from-indigo-900 to-indigo-800 relative overflow-hidden flex items-center justify-center">
                     <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                    <div className="w-16 h-16 bg-white/10 backdrop-blur-md rounded-2xl flex items-center justify-center shadow-lg border border-white/20">
-                        {step === 1 ? <UserIcon className="w-8 h-8 text-white" /> : <Globe className="w-8 h-8 text-white" />}
+
+                    {/* Animated Step Icon */}
+                    <div className={`transition-all duration-500 w-16 h-16 rounded-2xl flex items-center justify-center shadow-lg border border-white/20 backdrop-blur-md ${step === 1 ? 'bg-indigo-500/30' : 'bg-emerald-500/30'}`}>
+                        {step === 1 ? <UserIcon className="w-8 h-8 text-indigo-100" /> : <Globe className="w-8 h-8 text-emerald-100" />}
                     </div>
                 </div>
 
                 <div className="p-8">
-                    {step === 1 && (
-                        <div className="space-y-6 animate-in slide-in-from-right-8 duration-500">
-                            <div className="text-center space-y-2">
-                                <DialogTitle className="text-2xl font-bold text-slate-900">Welcome to ListNer!</DialogTitle>
-                                <DialogDescription>Let's set up your profile so your household knows who you are.</DialogDescription>
-                            </div>
+                    {/* Title Section */}
+                    <div className="mb-6 text-center space-y-1">
+                        <DialogTitle className="text-2xl font-extrabold text-slate-900 tracking-tight">
+                            {step === 1 ? "Who are you?" : "Where are you?"}
+                        </DialogTitle>
+                        <DialogDescription className="text-slate-500 font-medium">
+                            {step === 1 ? "Set up your profile identity." : "We'll customize prices for your region."}
+                        </DialogDescription>
+                    </div>
 
+                    {/* Step 1: Profile Setup */}
+                    {step === 1 && (
+                        <div className="space-y-6 animate-in slide-in-from-right-8 fade-in duration-300">
+
+                            {/* Avatar Uploader */}
                             <div className="flex justify-center">
                                 <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                                    <div className="w-24 h-24 rounded-full bg-slate-100 flex items-center justify-center border-4 border-white shadow-lg overflow-hidden">
+                                    <div className="w-24 h-24 rounded-full bg-slate-50 border-4 border-white shadow-xl overflow-hidden flex items-center justify-center transition-all group-hover:shadow-2xl">
                                         {avatarUrl ? (
-                                            <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+                                            <img src={avatarUrl} className="w-full h-full object-cover" alt="Avatar" />
                                         ) : (
-                                            <span className="text-2xl font-bold text-slate-300">{name ? name[0].toUpperCase() : "?"}</span>
+                                            <span className="text-3xl font-bold text-slate-300">{name?.[0]?.toUpperCase() || "?"}</span>
                                         )}
                                     </div>
-                                    <div className="absolute bottom-0 right-0 bg-teal-600 p-2 rounded-full text-white shadow-sm border-2 border-white">
+                                    <div className="absolute bottom-0 right-0 bg-indigo-600 p-2.5 rounded-full text-white shadow-md border-2 border-white group-hover:scale-110 transition-transform">
                                         {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
                                     </div>
                                     <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleAvatarUpload} />
                                 </div>
                             </div>
 
+                            {/* Name Input */}
                             <div className="space-y-2">
-                                <Label>Display Name</Label>
-                                <Input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Sarah" className="h-12 text-lg bg-slate-50 border-slate-200 focus:bg-white" />
+                                <Label className="ml-1 text-slate-500 font-bold text-[10px] uppercase tracking-wider">Display Name</Label>
+                                <Input
+                                    value={name}
+                                    onChange={e => setName(e.target.value)}
+                                    placeholder="e.g. Alex"
+                                    className="h-14 bg-slate-50 border-slate-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-indigo-100 transition-all text-lg font-medium px-4"
+                                />
                             </div>
 
-                            <Button onClick={saveProfile} disabled={loading} className="w-full h-12 bg-teal-900 hover:bg-teal-800 text-white text-base rounded-xl">
-                                Next Step <ArrowRight className="w-4 h-4 ml-2" />
+                            <Button onClick={saveProfile} disabled={loading || !name} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white rounded-2xl shadow-xl shadow-slate-200 font-bold text-base transition-all active:scale-95">
+                                Continue <ArrowRight className="w-5 h-5 ml-2 opacity-60" />
                             </Button>
                         </div>
                     )}
 
+                    {/* Step 2: Region Setup */}
                     {step === 2 && (
-                        <div className="space-y-6 animate-in slide-in-from-right-8 duration-500">
-                            <div className="text-center space-y-2">
-                                <DialogTitle className="text-2xl font-bold text-slate-900">Regional Settings</DialogTitle>
-                                <DialogDescription>Set your location to format prices correctly.</DialogDescription>
-                            </div>
-
+                        <div className="space-y-6 animate-in slide-in-from-right-8 fade-in duration-300">
                             <div className="space-y-4">
                                 <div className="space-y-2">
-                                    <Label>Country</Label>
-                                    <Select value={country} onValueChange={handleCountryChange}>
-                                        <SelectTrigger className="h-12 bg-slate-50 border-slate-200"><SelectValue /></SelectTrigger>
-                                        <SelectContent>{COUNTRIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                                    </Select>
+                                    <Label className="ml-1 text-slate-500 font-bold text-[10px] uppercase tracking-wider">Country</Label>
+                                    <div className="relative">
+                                        <MapPin className="absolute left-4 top-4 w-5 h-5 text-slate-400 z-10" />
+                                        <Select value={country} onValueChange={handleCountryChange}>
+                                            <SelectTrigger className="pl-12 h-14 bg-slate-50 border-slate-200 rounded-2xl font-medium text-slate-700">
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent className="max-h-[200px]">
+                                                {COUNTRIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
+
                                 <div className="space-y-2">
-                                    <Label>Currency</Label>
+                                    <Label className="ml-1 text-slate-500 font-bold text-[10px] uppercase tracking-wider">Currency</Label>
                                     <Select value={currency} onValueChange={setCurrency}>
-                                        <SelectTrigger className="h-12 bg-slate-50 border-slate-200"><SelectValue /></SelectTrigger>
-                                        <SelectContent>{CURRENCIES.map(c => <SelectItem key={c.code} value={c.code}>{c.symbol} - {c.name}</SelectItem>)}</SelectContent>
+                                        <SelectTrigger className="h-14 bg-slate-50 border-slate-200 rounded-2xl font-medium text-slate-700 px-4">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-[200px]">
+                                            {CURRENCIES.map(c => <SelectItem key={c.code} value={c.code}>{c.code} ({c.symbol}) - {c.name}</SelectItem>)}
+                                        </SelectContent>
                                     </Select>
-                                </div>
-                                <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100 flex gap-3 items-start">
-                                    <Sparkles className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                                    <p className="text-xs text-emerald-800 leading-relaxed">You're all set! You can change these settings anytime from the <strong>Settings</strong> tab.</p>
                                 </div>
                             </div>
 
-                            <div className="flex gap-3">
-                                <Button variant="ghost" onClick={() => setStep(1)} className="h-12 px-6">Back</Button>
-                                <Button onClick={saveHousehold} disabled={loading} className="flex-1 h-12 bg-emerald-600 hover:bg-emerald-700 text-white text-base rounded-xl shadow-lg shadow-emerald-200">
-                                    {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <>Get Started <CheckCircle2 className="w-5 h-5 ml-2" /></>}
+                            <div className="flex gap-3 pt-2">
+                                <Button variant="ghost" onClick={() => setStep(1)} className="h-14 w-20 rounded-2xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 font-bold">Back</Button>
+                                <Button onClick={saveHousehold} disabled={loading} className="flex-1 h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl shadow-xl shadow-emerald-200 font-bold text-base transition-all active:scale-95">
+                                    {loading ? "Finishing..." : "All Done"}
+                                    {loading ? <Loader2 className="w-5 h-5 ml-2 animate-spin" /> : <CheckCircle2 className="w-5 h-5 ml-2 opacity-60" />}
                                 </Button>
                             </div>
                         </div>

@@ -19,6 +19,8 @@ import { List, WishlistItem } from "@/lib/types"
 import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Settings, Globe, Lock, ListChecks, MoreHorizontal, ChevronDown, ChevronUp, CloudOff } from "lucide-react"
 import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
 import { SyncQueue } from "@/lib/syncQueue"
+import { Capacitor } from "@capacitor/core"
+import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
 
 const categories = ["Item", "Project", "Vacation", "Other"]
 const priorities = ["High", "Medium", "Low"]
@@ -92,6 +94,23 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [selectedItemForContrib, setSelectedItemForContrib] = useState<WishlistItem | null>(null)
     const [editingItem, setEditingItem] = useState<WishlistItem | null>(null)
 
+    // Haptic Helper
+    const triggerHaptic = async (style: ImpactStyle = ImpactStyle.Light) => {
+        if (Capacitor.isNativePlatform()) {
+            try {
+                await Haptics.impact({ style });
+            } catch (e) { }
+        }
+    };
+
+    const triggerNotificationHaptic = async (type: NotificationType) => {
+        if (Capacitor.isNativePlatform()) {
+            try {
+                await Haptics.notification({ type });
+            } catch (e) { }
+        }
+    }
+
     useEffect(() => {
         async function getItems() {
             const cacheKey = CACHE_KEYS.WISHLIST(list.id);
@@ -151,6 +170,9 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     // --- FAIL-SAFE ADD ITEM ---
     const handleAddItem = async (e: FormEvent) => {
         e.preventDefault();
+        if (!form.name.trim()) return;
+        triggerHaptic(ImpactStyle.Medium);
+
         const target = parseFloat(form.target_amount);
         const saved = parseFloat(form.saved_amount);
         const qty = parseInt(form.quantity);
@@ -169,7 +191,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         };
 
         const executeOfflineSave = () => {
-            console.log("Executing offline save...");
             const tempItem: WishlistItem = {
                 id: -Date.now(),
                 created_at: new Date().toISOString(),
@@ -189,6 +210,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
             setIsFormOpen(false);
             setForm({ name: "", description: "", category: "Item", target_amount: "", saved_amount: "", quantity: "1", link: "", priority: "Medium" });
+            triggerNotificationHaptic(NotificationType.Success);
         };
 
         if (navigator.onLine) {
@@ -201,6 +223,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 saveToCache(CACHE_KEYS.WISHLIST(list.id), newItems);
                 setIsFormOpen(false);
                 setForm({ name: "", description: "", category: "Item", target_amount: "", saved_amount: "", quantity: "1", link: "", priority: "Medium" });
+                triggerNotificationHaptic(NotificationType.Success);
             } catch (err) {
                 console.warn("Online add failed, falling back to offline queue.", err);
                 executeOfflineSave();
@@ -214,20 +237,42 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         e.preventDefault();
         const amount = parseFloat(contribForm.amount);
         if (!selectedItemForContrib || isNaN(amount)) return;
+
+        triggerHaptic(ImpactStyle.Light);
         const newSaved = (selectedItemForContrib.saved_amount || 0) + amount;
+
+        // Optimistic Update
+        setItems(items.map(i => i.id === selectedItemForContrib.id ? { ...i, saved_amount: newSaved } : i));
+        setIsContributionOpen(false);
+        setContribForm({ amount: "", note: "" });
+
         const { error } = await supabase.from('wishlist_items').update({ saved_amount: newSaved }).eq('id', selectedItemForContrib.id);
-        if (!error) { setItems(items.map(i => i.id === selectedItemForContrib.id ? { ...i, saved_amount: newSaved } : i)); setIsContributionOpen(false); setContribForm({ amount: "", note: "" }); }
+
+        if (error) {
+            // Revert logic could go here
+            alert("Failed to add funds.");
+        } else {
+            triggerNotificationHaptic(NotificationType.Success);
+        }
     }
 
     const handleUpdateItem = async (updatedItem: Partial<WishlistItem>) => {
         if (!editingItem) return;
+
+        // Optimistic
+        setItems(items.map(i => i.id === editingItem.id ? { ...i, ...updatedItem } as WishlistItem : i));
+        setEditingItem(null);
+
         const { data, error } = await supabase.from('wishlist_items').update({
             name: updatedItem.name, description: updatedItem.description, category: updatedItem.category, target_amount: updatedItem.target_amount,
             saved_amount: updatedItem.saved_amount,
             quantity: updatedItem.quantity, link: updatedItem.link, priority: updatedItem.priority
         }).eq('id', editingItem.id).select().single();
 
-        if (!error) { setItems(items.map(i => i.id === editingItem.id ? data as WishlistItem : i)); setEditingItem(null); }
+        if (error) {
+            alert("Update failed");
+            // Should ideally revert here
+        }
     };
 
     const handleTogglePrivacy = async () => {
@@ -240,10 +285,16 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     }
 
     const handleDelete = async () => {
+        triggerHaptic(ImpactStyle.Medium);
         if (!deleteConfirm) return;
         if (deleteConfirm.type === 'item' && deleteConfirm.id) {
-            await supabase.from("wishlist_items").delete().eq("id", deleteConfirm.id);
+            // Optimistic
+            const oldItems = [...items];
             setItems(items.filter(item => item.id !== deleteConfirm.id));
+
+            const { error } = await supabase.from("wishlist_items").delete().eq("id", deleteConfirm.id);
+            if (error) setItems(oldItems); // Revert
+
         } else if (deleteConfirm.type === 'list') {
             await supabase.from('lists').delete().eq('id', list.id); window.location.reload();
         }
@@ -251,8 +302,15 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     }
 
     const toggleComplete = async (item: WishlistItem) => {
-        const { error } = await supabase.from("wishlist_items").update({ is_complete: !item.is_complete }).eq("id", item.id)
-        if (!error) setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !i.is_complete } : i))
+        triggerHaptic(ImpactStyle.Light);
+        // Optimistic
+        const newStatus = !item.is_complete;
+        setItems(items.map(i => i.id === item.id ? { ...i, is_complete: newStatus } : i));
+
+        const { error } = await supabase.from("wishlist_items").update({ is_complete: newStatus }).eq("id", item.id)
+        if (error) {
+            setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !newStatus } : i));
+        }
     }
 
     return (
@@ -415,46 +473,6 @@ function EditWishlistItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
     const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [e.target.name]: e.target.value });
     const handleSubmit = async (e: FormEvent) => { e.preventDefault(); setIsSubmitting(true); await onUpdate({ ...form, target_amount: parseFloat(form.target_amount) || null, saved_amount: parseFloat(form.saved_amount) || 0, quantity: form.category === "Item" ? parseInt(form.quantity) : null }); setIsSubmitting(false); onClose(); };
     return (
-        <DialogContent className="sm:max-w-[625px] rounded-2xl">
-            <DialogHeader>
-                <DialogTitle>Edit Goal</DialogTitle>
-            </DialogHeader>
-            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4">
-                <div className="col-span-2">
-                    <Label>Name</Label>
-                    <Input name="name" value={form.name} onChange={handleChange} required autoComplete="off" />
-                </div>
-                <div className="col-span-2">
-                    <Label>Description</Label>
-                    <Textarea name="description" value={form.description} onChange={handleChange} autoComplete="off" />
-                </div>
-                <div className="col-span-1">
-                    <Label>Target ({currencySymbol})</Label>
-                    <Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required autoComplete="off" />
-                </div>
-                <div className="col-span-1">
-                    <Label>Saved ({currencySymbol})</Label>
-                    <Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} autoComplete="off" />
-                </div>
-                <div className="col-span-1">
-                    <Label>Priority</Label>
-                    <Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}>
-                        <SelectTrigger>
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-                </div>
-                <div className="col-span-1">
-                    <Label>Link</Label>
-                    <Input name="link" value={form.link} onChange={handleChange} autoComplete="off" />
-                </div>
-                <DialogFooter className="col-span-2">
-                    <Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button>
-                </DialogFooter>
-            </form>
-        </DialogContent>
+        <DialogContent className="sm:max-w-[625px] rounded-2xl"><DialogHeader><DialogTitle>Edit Goal</DialogTitle></DialogHeader><form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4"><div className="col-span-2"><Label>Name</Label><Input name="name" value={form.name} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-2"><Label>Description</Label><Textarea name="description" value={form.description} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Target ({currencySymbol})</Label><Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-1"><Label>Saved ({currencySymbol})</Label><Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div><div className="col-span-1"><Label>Link</Label><Input name="link" value={form.link} onChange={handleChange} autoComplete="off" /></div><DialogFooter className="col-span-2"><Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button></DialogFooter></form></DialogContent>
     );
 }

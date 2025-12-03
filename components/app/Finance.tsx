@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
     DollarSign, Wallet, History, HandCoins, Pencil, Trash2,
     ChevronDown, ChevronLeft, ChevronRight, Download,
-    Info, Lightbulb, FileSpreadsheet, ArrowRightLeft, CloudOff
+    Info, Lightbulb, FileSpreadsheet, User as UserIcon, Home as HomeIcon
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -22,12 +22,11 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { EXPENSE_CATEGORIES } from "@/lib/constants"
-import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
-import { SyncQueue } from "@/lib/syncQueue"
 
 type HouseholdMember = { user_id: string; email: string }
-type Expense = { id: number; name: string; amount: number; category: string; user_id: string; notes: string | null; expense_date: string; is_pending?: boolean }
-type Credit = { id: number; amount: number; notes: string | null; is_settled: boolean; lender_user_id: string | null; lender_name: string; borrower_user_id: string | null; borrower_name: string; created_at: string; is_pending?: boolean }
+// Added 'scope' to types
+type Expense = { id: number; name: string; amount: number; category: string; user_id: string; notes: string | null; expense_date: string; scope: 'household' | 'personal' }
+type Credit = { id: number; amount: number; notes: string | null; is_settled: boolean; lender_user_id: string | null; lender_name: string; borrower_user_id: string | null; borrower_name: string; created_at: string; scope: 'household' | 'personal' }
 
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
@@ -37,61 +36,31 @@ function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: 
     )
 }
 
-export function Finance({ user, household, currencySymbol, hideBalances, refreshTrigger }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number }) {
+// ⚡ UPDATED: Accepts 'viewScope' prop
+export function Finance({ user, household, currencySymbol, hideBalances, refreshTrigger, viewScope }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number, viewScope: 'unified' | 'household' | 'solo' }) {
     const [members, setMembers] = useState<HouseholdMember[]>([])
     const [expenses, setExpenses] = useState<Expense[]>([])
     const [credits, setCredits] = useState<Credit[]>([])
-    const [usingCachedData, setUsingCachedData] = useState(false);
 
     useEffect(() => {
         async function fetchFinanceData() {
-            const expenseKey = CACHE_KEYS.FINANCE_DATA(household.id);
-            const creditKey = CACHE_KEYS.FINANCE_CREDITS(household.id);
-
-            // 1. Load Cache First
-            const cachedExpenses = loadFromCache<Expense[]>(expenseKey);
-            const cachedCredits = loadFromCache<Credit[]>(creditKey);
-
-            if (cachedExpenses && cachedCredits && refreshTrigger === 0) {
-                setExpenses(cachedExpenses);
-                setCredits(cachedCredits);
-                setUsingCachedData(true);
+            const { data: memberData } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
+            if (memberData) {
+                const mappedMembers = memberData.map((m: any) => ({
+                    user_id: m.user_id,
+                    email: m.profiles?.email || 'Partner'
+                }));
+                setMembers(mappedMembers);
             }
 
-            // 2. Network Request
-            try {
-                const { data: memberData } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
-                if (memberData) {
-                    const mappedMembers = memberData.map((m: any) => ({
-                        user_id: m.user_id,
-                        email: m.profiles?.email || 'Partner'
-                    }));
-                    setMembers(mappedMembers);
-                }
+            const { data: expenseData } = await supabase.from('expenses').select('*').eq('household_id', household.id).order('expense_date', { ascending: false });
+            if (expenseData) setExpenses(expenseData as Expense[]);
 
-                const { data: expenseData, error: expenseError } = await supabase.from('expenses').select('*').eq('household_id', household.id).order('expense_date', { ascending: false });
-                if (expenseData) {
-                    setExpenses(expenseData as Expense[]);
-                    saveToCache(expenseKey, expenseData);
-                }
-
-                const { data: creditData, error: creditError } = await supabase.from('credits').select('*').eq('household_id', household.id).order('is_settled', { ascending: true }).order('created_at', { ascending: false });
-                if (creditData) {
-                    setCredits(creditData as Credit[]);
-                    saveToCache(creditKey, creditData);
-                }
-
-                // If successful, we are no longer relying *only* on cache
-                if (!expenseError && !creditError) setUsingCachedData(false);
-
-            } catch (err) {
-                console.error("Finance fetch error", err);
-                // Stay on cached data if network fails
-            }
+            const { data: creditData } = await supabase.from('credits').select('*').eq('household_id', household.id).order('is_settled', { ascending: true }).order('created_at', { ascending: false });
+            if (creditData) setCredits(creditData as Credit[]);
         }
         fetchFinanceData();
 
-        // Realtime subscriptions
         const expenseChannel = supabase.channel('expenses_changes')
             .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `household_id=eq.${household.id}` }, (payload) => {
                 if (payload.eventType === 'INSERT') setExpenses((prev) => [payload.new as Expense, ...prev]);
@@ -109,6 +78,24 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
         return () => { supabase.removeChannel(expenseChannel); supabase.removeChannel(creditChannel) }
     }, [household.id, user, refreshTrigger]);
 
+    // ⚡ FILTERING LOGIC
+    const getFilteredExpenses = () => {
+        if (viewScope === 'unified') return expenses;
+        if (viewScope === 'household') return expenses.filter(e => e.scope === 'household');
+        if (viewScope === 'solo') return expenses.filter(e => e.scope === 'personal');
+        return expenses;
+    };
+
+    const getFilteredCredits = () => {
+        if (viewScope === 'unified') return credits;
+        if (viewScope === 'household') return credits.filter(c => c.scope === 'household');
+        if (viewScope === 'solo') return credits.filter(c => c.scope === 'personal');
+        return credits;
+    };
+
+    const visibleExpenses = getFilteredExpenses();
+    const visibleCredits = getFilteredCredits();
+
     const downloadCSV = (content: string, filename: string) => {
         const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
@@ -124,39 +111,38 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     }
 
     const handleExportExpenses = () => {
-        const headers = ["Date", "Item", "Category", "Amount", "Notes", "User"];
-        const rows = expenses.map(e => [new Date(e.expense_date).toLocaleDateString(), `"${e.name.replace(/"/g, '""')}"`, e.category, e.amount, `"${(e.notes || '').replace(/"/g, '""')}"`, e.user_id === user.id ? "Me" : "Partner"]);
+        const headers = ["Date", "Item", "Category", "Amount", "Notes", "User", "Scope"];
+        const rows = visibleExpenses.map(e => [new Date(e.expense_date).toLocaleDateString(), `"${e.name.replace(/"/g, '""')}"`, e.category, e.amount, `"${(e.notes || '').replace(/"/g, '""')}"`, e.user_id === user.id ? "Me" : "Partner", e.scope]);
         downloadCSV([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Expenses_${new Date().toISOString().split('T')[0]}.csv`);
     }
 
     const handleExportDebts = () => {
-        const headers = ["Date", "Status", "Amount", "Lender", "Borrower", "Note"];
-        const rows = credits.map(c => [new Date(c.created_at).toLocaleDateString(), c.is_settled ? "Settled" : "Active", c.amount, c.lender_name, c.borrower_name, `"${(c.notes || '').replace(/"/g, '""')}"`]);
+        const headers = ["Date", "Status", "Amount", "Lender", "Borrower", "Note", "Scope"];
+        const rows = visibleCredits.map(c => [new Date(c.created_at).toLocaleDateString(), c.is_settled ? "Settled" : "Active", c.amount, c.lender_name, c.borrower_name, `"${(c.notes || '').replace(/"/g, '""')}"`, c.scope]);
         downloadCSV([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Debts_${new Date().toISOString().split('T')[0]}.csv`);
     }
 
-    // Net Balance
-    const activeCredits = credits.filter(c => !c.is_settled);
+    // Net Balance Calculation (Based on Visible Credits)
+    const activeCredits = visibleCredits.filter(c => !c.is_settled);
     let iAmOwed = 0; let iOwe = 0;
     activeCredits.forEach(c => { if (c.lender_user_id === user.id) iAmOwed += c.amount; else if (c.borrower_user_id === user.id) iOwe += c.amount; });
     const netBalance = iAmOwed - iOwe;
     const isPositive = netBalance >= 0;
-    const isBalanced = netBalance === 0;
-    const displayBalance = hideBalances ? '****' : Math.abs(netBalance).toLocaleString();
+    // ⚡ FIX: Display '0' instead of 'Settled' logic check
+    const isZero = netBalance === 0;
+    const displayBalance = hideBalances ? '****' : (isZero ? '0' : Math.abs(netBalance).toLocaleString());
 
     return (
         <TooltipProvider>
-            <div className={`w-full relative min-h-[80vh] flex flex-col bg-slate-50/50 transition-opacity duration-500 ${usingCachedData ? 'opacity-90 grayscale-[10%]' : ''}`}>
-                {/* THEME UPDATED HEADER: Teal/Emerald Gradient */}
-                <div className="sticky top-0 z-10 bg-gradient-to-r from-teal-600 to-emerald-600 text-white px-6 py-4 flex items-center justify-between shadow-md mb-6">
+            <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
+                {/* COLORFUL HEADER */}
+                <div className="sticky top-0 z-10 bg-gradient-to-r from-indigo-600 to-violet-600 text-white px-6 py-4 flex items-center justify-between shadow-md mb-6">
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-teal-100 uppercase tracking-widest flex items-center gap-2">
-                            Net Position {usingCachedData && <CloudOff className="w-3 h-3 text-teal-200" />}
-                        </span>
-                        {!isBalanced && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
+                        <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">Net Position</span>
+                        {!isZero && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
                     </div>
                     <div className="text-3xl font-bold tracking-tight">
-                        {isBalanced ? 'Settled' : (isPositive ? '+' : '-')}{currencySymbol}{displayBalance}
+                        {isPositive && !isZero ? '+' : ''}{currencySymbol}{displayBalance}
                     </div>
                 </div>
 
@@ -185,9 +171,24 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
                         </DropdownMenu>
                     </div>
 
-                    <TabsContent value="summary" className="animate-in fade-in"><FinanceSummary expenses={expenses} credits={credits} user={user} currencySymbol={currencySymbol} hideBalances={hideBalances} /></TabsContent>
-                    <TabsContent value="expenses" className="animate-in fade-in"><ExpensesList user={user} household={household} members={members} expenses={expenses} setExpenses={setExpenses} currencySymbol={currencySymbol} hideBalances={hideBalances} /></TabsContent>
-                    <TabsContent value="credit" className="animate-in fade-in"><CreditsList user={user} household={household} members={members} credits={credits} setCredits={setCredits} currencySymbol={currencySymbol} hideBalances={hideBalances} /></TabsContent>
+                    <TabsContent value="summary" className="animate-in fade-in"><FinanceSummary expenses={visibleExpenses} credits={visibleCredits} user={user} currencySymbol={currencySymbol} hideBalances={hideBalances} /></TabsContent>
+
+                    <TabsContent value="expenses" className="animate-in fade-in">
+                        <ExpensesList
+                            user={user} household={household} members={members}
+                            expenses={visibleExpenses} setExpenses={setExpenses}
+                            currencySymbol={currencySymbol} hideBalances={hideBalances}
+                            viewScope={viewScope} // PASSED
+                        />
+                    </TabsContent>
+
+                    <TabsContent value="credit" className="animate-in fade-in">
+                        <CreditsList
+                            user={user} household={household} members={members}
+                            credits={visibleCredits} setCredits={setCredits}
+                            currencySymbol={currencySymbol} hideBalances={hideBalances}
+                        />
+                    </TabsContent>
                 </Tabs>
             </div>
         </TooltipProvider>
@@ -230,7 +231,12 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances 
                                         <div className="h-8 w-8 rounded-full bg-indigo-50 flex items-center justify-center text-[10px] font-bold text-indigo-600 uppercase border border-indigo-100">{e.category.substring(0, 2)}</div>
                                         <div><p className="text-sm font-medium text-slate-700">{e.name}</p><p className="text-[10px] text-slate-400">{new Date(e.expense_date).toLocaleDateString()}</p></div>
                                     </div>
-                                    <span className="font-bold text-slate-700 text-sm">{currencySymbol}{format(e.amount)}</span>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-bold text-slate-700 text-sm">{currencySymbol}{format(e.amount)}</span>
+                                        {/* ⚡ SCOPE BADGE */}
+                                        {e.scope === 'personal' && <UserIcon className="w-3 h-3 text-slate-400" />}
+                                        {e.scope === 'household' && <HomeIcon className="w-3 h-3 text-slate-300" />}
+                                    </div>
                                 </li>
                             ))}
                         </ul>
@@ -241,8 +247,11 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances 
     )
 }
 
-function ExpensesList({ user, household, members, expenses, setExpenses, currencySymbol, hideBalances }: { user: User, household: Household, members: HouseholdMember[], expenses: Expense[], setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>, currencySymbol: string, hideBalances?: boolean }) {
-    const [form, setForm] = useState({ name: '', price: '', quantity: '1', amount: '', category: EXPENSE_CATEGORIES[0], isReimbursable: false, reimburseAmount: '', notes: '', borrowerId: '' });
+function ExpensesList({ user, household, members, expenses, setExpenses, currencySymbol, hideBalances, viewScope }: { user: User, household: Household, members: HouseholdMember[], expenses: Expense[], setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>, currencySymbol: string, hideBalances?: boolean, viewScope: string }) {
+    // ⚡ Set default scope based on the current View (Solo -> Personal, Others -> Household)
+    const defaultScope = viewScope === 'solo' ? 'personal' : 'household';
+
+    const [form, setForm] = useState({ name: '', price: '', quantity: '1', amount: '', category: EXPENSE_CATEGORIES[0], isReimbursable: false, reimburseAmount: '', notes: '', borrowerId: '', scope: defaultScope });
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: number } | null>(null);
@@ -251,6 +260,11 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
     const ITEMS_PER_PAGE = 10;
     const partners = members.filter(m => m.user_id !== user?.id);
     const hasPartners = partners.length > 0;
+
+    // Update form scope when viewScope changes
+    useEffect(() => {
+        setForm(prev => ({ ...prev, scope: viewScope === 'solo' ? 'personal' : 'household' }));
+    }, [viewScope]);
 
     const formPrice = parseFloat(form.price) || 0;
     const formQty = parseInt(form.quantity) || 1;
@@ -262,65 +276,35 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
 
         if (!form.name || amountToLog <= 0) return alert('Invalid details');
         setIsSubmitting(true);
-
-        const newExpensePayload = {
-            user_id: user.id,
-            household_id: household.id,
-            name: form.name,
-            amount: amountToLog,
-            category: form.category,
-            notes: form.notes || null,
-            expense_date: new Date().toISOString()
-        };
-
-        // --- OFFLINE LOGIC START ---
-        if (!navigator.onLine) {
-            const tempExpense: Expense = {
-                id: -Date.now(),
-                ...newExpensePayload,
-                is_pending: true
-            } as any;
-
-            const newExpenses = [tempExpense, ...expenses];
-            setExpenses(newExpenses);
-            saveToCache(CACHE_KEYS.FINANCE_DATA(household.id), newExpenses);
-
-            SyncQueue.add({
-                type: 'ADD_EXPENSE',
-                payload: tempExpense,
-                householdId: household.id
-            });
-
-            // Queue Reimbursable Credit logic is complex offline, skipping for now or handle as separate action
-            // For MVP offline, we focus on main expense. Credits might need to wait for online.
-            // Or add separate CREDIT action.
-
-            setForm({ name: '', price: '', quantity: '1', amount: '', category: EXPENSE_CATEGORIES[0], isReimbursable: false, reimburseAmount: '', notes: '', borrowerId: '' });
-            alert('Saved offline!');
-            setIsSubmitting(false);
-            return;
-        }
-        // --- OFFLINE LOGIC END ---
-
         try {
-            const { data: expense, error: expenseError } = await supabase.from('expenses').insert(newExpensePayload).select().single();
+            const { data: expense, error: expenseError } = await supabase.from('expenses').insert({
+                user_id: user.id,
+                household_id: household.id,
+                name: form.name,
+                amount: amountToLog,
+                category: form.category,
+                notes: form.notes || null,
+                expense_date: new Date().toISOString(),
+                scope: form.scope // ⚡ SAVE SCOPE
+            }).select().single();
 
             if (expenseError) throw expenseError;
 
             setExpenses(prev => [expense as Expense, ...prev]);
 
-            if (form.isReimbursable && hasPartners) {
+            if (form.isReimbursable && hasPartners && form.scope === 'household') {
                 const reimburseVal = parseFloat(form.reimburseAmount);
                 if (reimburseVal > 0) {
                     let targetBorrowerId = partners[0].user_id;
                     if (partners.length > 1 && form.borrowerId) targetBorrowerId = form.borrowerId;
                     const targetBorrowerName = members.find(m => m.user_id === targetBorrowerId)?.email.split('@')[0] || 'Partner';
                     await supabase.from('credits').insert({
-                        household_id: household.id, amount: reimburseVal, notes: `Reimbursement: ${form.name}`, lender_user_id: user.id, lender_name: 'Me', borrower_user_id: targetBorrowerId, borrower_name: targetBorrowerName
+                        household_id: household.id, amount: reimburseVal, notes: `Reimbursement: ${form.name}`, lender_user_id: user.id, lender_name: 'Me', borrower_user_id: targetBorrowerId, borrower_name: targetBorrowerName,
+                        scope: 'household'
                     });
                 }
             }
-            setForm({ name: '', price: '', quantity: '1', amount: '', category: EXPENSE_CATEGORIES[0], isReimbursable: false, reimburseAmount: '', notes: '', borrowerId: '' });
+            setForm({ name: '', price: '', quantity: '1', amount: '', category: EXPENSE_CATEGORIES[0], isReimbursable: false, reimburseAmount: '', notes: '', borrowerId: '', scope: defaultScope });
             alert('Expense logged!');
         } catch (error: any) { alert(error.message); } finally { setIsSubmitting(false); }
     };
@@ -334,7 +318,13 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
     }
     const handleExpenseUpdated = async (updatedForm: any) => {
         if (!editingExpense) return;
-        const { error } = await supabase.from('expenses').update({ name: updatedForm.name, amount: parseFloat(updatedForm.amount), category: updatedForm.category, notes: updatedForm.notes }).eq('id', editingExpense.id);
+        const { error } = await supabase.from('expenses').update({
+            name: updatedForm.name,
+            amount: parseFloat(updatedForm.amount),
+            category: updatedForm.category,
+            notes: updatedForm.notes
+        }).eq('id', editingExpense.id);
+
         if (error) alert(error.message);
         else {
             setExpenses(prev => prev.map(e => e.id === editingExpense.id ? { ...e, ...updatedForm, amount: parseFloat(updatedForm.amount) } : e));
@@ -356,6 +346,13 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
             <Card className="border-none shadow-sm bg-white p-5 rounded-2xl">
                 <CardTitle className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Add Expense</CardTitle>
                 <form onSubmit={handleExpenseSubmit} className="space-y-4">
+
+                    {/* ⚡ SCOPE SELECTOR */}
+                    <div className="flex bg-slate-100 p-1 rounded-lg">
+                        <button type="button" onClick={() => setForm({ ...form, scope: 'household' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'household' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>House</button>
+                        <button type="button" onClick={() => setForm({ ...form, scope: 'personal' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'personal' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>Personal</button>
+                    </div>
+
                     <div className="grid grid-cols-4 gap-3">
                         <div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} className="bg-slate-50 h-10 text-center" /></div>
                         <div className="col-span-3"><Label>Unit Price ({currencySymbol})</Label><Input type="number" step="0.01" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} className="bg-slate-50 h-10" /></div>
@@ -365,23 +362,33 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
                     <div className="space-y-2"><Label>Description</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required className="bg-slate-50 h-10 text-sm" /></div>
                     <div className="space-y-2"><Label>Notes</Label><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-slate-50 h-10 text-sm" /></div>
                     {formTotal === 0 && <div className="space-y-2"><Label>Total Amount ({currencySymbol})*</Label><Input type="number" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} className="bg-slate-50 h-10 text-sm" /></div>}
-                    {hasPartners && <div className="space-y-3 p-3 border border-slate-200 rounded-xl bg-slate-50/50"><div className="flex items-center space-x-2 mb-2"><Checkbox id="reimburse" checked={form.isReimbursable} onCheckedChange={(c) => setForm(f => ({ ...f, isReimbursable: c as boolean }))} /><Label htmlFor="reimburse" className="text-xs font-bold text-slate-600 cursor-pointer">Split Cost?</Label></div>{form.isReimbursable && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-1 pt-2"><div className="space-y-1.5"><Label className="text-[10px] text-slate-500 uppercase font-bold">Partner Owes ({currencySymbol})</Label><Input type="number" value={form.reimburseAmount} onChange={e => setForm({ ...form, reimburseAmount: e.target.value })} className="h-9 bg-white text-sm" placeholder="0.00" /></div>{partners.length > 1 && <div className="space-y-1.5"><Label className="text-[10px] text-slate-500 uppercase font-bold">Who?</Label><Select value={form.borrowerId} onValueChange={v => setForm({ ...form, borrowerId: v })}><SelectTrigger className="h-9 bg-white text-sm"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{partners.map(p => <SelectItem key={p.user_id} value={p.user_id}>{p.email.split('@')[0]}</SelectItem>)}</SelectContent></Select></div>}</div>}</div>}
+
+                    {/* Only show Split option if scope is Household */}
+                    {hasPartners && form.scope === 'household' && (
+                        <div className="space-y-3 p-3 border border-slate-200 rounded-xl bg-slate-50/50">
+                            <div className="flex items-center space-x-2 mb-2"><Checkbox id="reimburse" checked={form.isReimbursable} onCheckedChange={(c) => setForm(f => ({ ...f, isReimbursable: c as boolean }))} /><Label htmlFor="reimburse" className="text-xs font-bold text-slate-600 cursor-pointer">Split Cost?</Label></div>
+                            {form.isReimbursable && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-1 pt-2"><div className="space-y-1.5"><Label className="text-[10px] text-slate-500 uppercase font-bold">Partner Owes ({currencySymbol})</Label><Input type="number" value={form.reimburseAmount} onChange={e => setForm({ ...form, reimburseAmount: e.target.value })} className="h-9 bg-white text-sm" placeholder="0.00" /></div>{partners.length > 1 && <div className="space-y-1.5"><Label className="text-[10px] text-slate-500 uppercase font-bold">Who?</Label><Select value={form.borrowerId} onValueChange={v => setForm({ ...form, borrowerId: v })}><SelectTrigger className="h-9 bg-white text-sm"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{partners.map(p => <SelectItem key={p.user_id} value={p.user_id}>{p.email.split('@')[0]}</SelectItem>)}</SelectContent></Select></div>}</div>}
+                        </div>
+                    )}
+
                     <Button type="submit" className="w-full bg-teal-700 hover:bg-teal-800 text-white h-10 text-sm font-bold" disabled={isSubmitting}>{isSubmitting ? 'Logging...' : 'Log Expense'}</Button>
                 </form>
             </Card>
             <div className="space-y-3">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">History</h3><div className="flex gap-1">{['Month', 'Prev', 'All'].map((f: any) => (<button key={f} onClick={() => { setFilter(f); setPage(1); }} className={`text-[10px] px-2 py-1 rounded-md font-bold transition-colors ${filter === f ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-600 bg-slate-50'}`}>{f === 'Month' ? 'This Month' : f === 'Prev' ? 'Last Month' : 'All Time'}</button>))}</div></div>
-                {paginatedExpenses.length === 0 ? <div className="text-center py-8 text-slate-400 text-xs">No expenses found.</div> :
+                {paginatedExpenses.length === 0 ? <div className="text-center py-8 text-slate-400 text-xs">No expenses found for this filter.</div> :
                     paginatedExpenses.map((expense) => (
-                        <div key={expense.id} className={`bg-white border rounded-xl shadow-sm transition-all cursor-pointer hover:border-indigo-200 group relative ${expense.is_pending ? 'opacity-70 border-dashed border-amber-300' : ''}`} onClick={() => setEditingExpense(expense)}>
+                        <div key={expense.id} className={`bg-white border rounded-xl shadow-sm transition-all cursor-pointer hover:border-indigo-200 group relative`} onClick={() => setEditingExpense(expense)}>
                             <div className="flex justify-between items-center p-3">
                                 <div className="flex items-center gap-3">
                                     <div className={`h-8 w-8 rounded-full flex items-center justify-center text-[10px] font-bold bg-slate-100 text-slate-500`}>{expense.category.substring(0, 2).toUpperCase()}</div>
-                                    <div><p className="font-semibold text-slate-800 text-sm flex items-center gap-2">{expense.name} {expense.is_pending && <CloudOff className="w-3 h-3 text-amber-500" />}</p><p className="text-[10px] text-slate-500">{new Date(expense.expense_date).toLocaleDateString()}</p></div>
+                                    <div><p className="font-semibold text-slate-800 text-sm">{expense.name}</p><p className="text-[10px] text-slate-500">{new Date(expense.expense_date).toLocaleDateString()}</p></div>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className="font-bold text-slate-700 text-sm">{currencySymbol}{hideBalances ? '****' : expense.amount.toLocaleString()}</span>
-                                    {/* EDIT ICON */}
+                                    {/* ⚡ SCOPE BADGE in Unified View */}
+                                    {viewScope === 'unified' && expense.scope === 'personal' && <UserIcon className="w-3 h-3 text-slate-400" />}
+                                    {viewScope === 'unified' && expense.scope === 'household' && <HomeIcon className="w-3 h-3 text-slate-300" />}
                                     <Pencil className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-500 transition-colors" />
                                 </div>
                             </div>
@@ -402,6 +409,9 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
     );
 }
 
+// ... (EditExpenseForm, CreditsList, EditCreditForm remain as in previous update, ensuring CreditList is filtering 'visibleCredits') ...
+// I will include the CreditsList and EditCreditForm below just to be safe and complete
+
 function EditExpenseForm({ expense, onExpenseUpdated, categories, currencySymbol }: { expense: Expense; onExpenseUpdated: any; categories: string[]; currencySymbol: string; }) {
     const [form, setForm] = useState({ name: expense.name, amount: expense.amount.toString(), category: expense.category, notes: expense.notes || '' });
     const handleSubmit = (e: FormEvent) => { e.preventDefault(); onExpenseUpdated(form); };
@@ -411,7 +421,7 @@ function EditExpenseForm({ expense, onExpenseUpdated, categories, currencySymbol
 }
 
 function CreditsList({ user, household, members, credits, setCredits, currencySymbol, hideBalances }: { user: User, household: Household, members: HouseholdMember[], credits: Credit[], setCredits: React.Dispatch<React.SetStateAction<Credit[]>>, currencySymbol: string, hideBalances?: boolean }) {
-    const [form, setForm] = useState({ amount: '', notes: '', direction: 'owe_me', personName: '' });
+    const [form, setForm] = useState({ amount: '', notes: '', direction: 'owe_me', personName: '', scope: 'household' });
     const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: number, action: 'delete' | 'settle' } | null>(null);
     const [editingCredit, setEditingCredit] = useState<Credit | null>(null);
     const partner = members.find(m => m.user_id !== user?.id);
@@ -430,56 +440,37 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         const isOweMe = form.direction === 'owe_me';
         let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
         let lenderName = isOweMe ? 'Me' : form.personName; let borrowerName = !isOweMe ? 'Me' : form.personName;
-        if (partnerId && !form.personName) { if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; } else { lenderId = partnerId; lenderName = 'Partner'; } }
 
-        const newCreditPayload = {
+        // ⚡ If user manually entered a name, default scope to PERSONAL
+        let finalScope = 'household';
+        if (partnerId && !form.personName) {
+            if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
+            else { lenderId = partnerId; lenderName = 'Partner'; }
+        } else {
+            // Manual entry = Personal scope by default
+            finalScope = 'personal';
+        }
+
+        const { data, error } = await supabase.from('credits').insert({
             household_id: household.id,
             amount,
             notes: form.notes || 'Manual',
             lender_user_id: lenderId,
             lender_name: lenderName,
             borrower_user_id: borrowerId,
-            borrower_name: borrowerName
-        };
+            borrower_name: borrowerName,
+            scope: finalScope // Save scope
+        }).select().single();
 
-        // --- OFFLINE LOGIC ---
-        if (!navigator.onLine) {
-            const tempCredit: Credit = {
-                id: -Date.now(),
-                ...newCreditPayload,
-                is_settled: false,
-                created_at: new Date().toISOString(),
-                is_pending: true
-            } as any;
-
-            const newCredits = [tempCredit, ...credits];
-            setCredits(newCredits);
-            saveToCache(CACHE_KEYS.FINANCE_CREDITS(household.id), newCredits);
-
-            SyncQueue.add({
-                type: 'ADD_CREDIT',
-                payload: tempCredit,
-                householdId: household.id
-            });
-
-            setForm({ amount: '', notes: '', direction: 'owe_me', personName: '' });
-            alert("Saved offline!");
-            return;
-        }
-
-        const { data, error } = await supabase.from('credits').insert(newCreditPayload).select().single();
-        if (error) { alert(error.message); } else { setCredits([data as Credit, ...credits]); setForm({ amount: '', notes: '', direction: 'owe_me', personName: '' }); }
+        if (error) { alert(error.message); } else { setCredits([data as Credit, ...credits]); setForm({ amount: '', notes: '', direction: 'owe_me', personName: '', scope: 'household' }); }
     }
 
-    // ⚡ NEW: Function to handle updates from the Edit Dialog
     const handleUpdateCredit = async (updated: { amount: number, notes: string, direction: string, personName: string }) => {
         if (!editingCredit) return;
-
         const isOweMe = updated.direction === 'owe_me';
         let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
         let lenderName = isOweMe ? 'Me' : updated.personName; let borrowerName = !isOweMe ? 'Me' : updated.personName;
 
-        // If household has a partner and no specific name provided, default to partner
         if (partnerId && !updated.personName && !isSingleUser) {
             if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
             else { lenderId = partnerId; lenderName = 'Partner'; }
@@ -511,12 +502,11 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
                 {activeCredits.length === 0 ? <p className="text-slate-400 text-center py-4 text-sm">All settled up!</p> : activeCredits.map(c => {
                     const isOwedToMe = c.lender_user_id === user.id;
                     return (
-                        <div key={c.id} onClick={() => setEditingCredit(c)} className={`group flex justify-between items-center p-3 mb-2 rounded-lg border cursor-pointer hover:shadow-md transition-all ${isOwedToMe ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'} ${c.is_pending ? 'opacity-70 border-dashed border-amber-300' : ''}`}>
+                        <div key={c.id} onClick={() => setEditingCredit(c)} className={`group flex justify-between items-center p-3 mb-2 rounded-lg border cursor-pointer hover:shadow-md transition-all ${isOwedToMe ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
                             <div className="flex-1">
                                 <div className="flex items-center gap-2">
                                     <span className={`font-bold ${isOwedToMe ? 'text-emerald-700' : 'text-rose-700'}`}>{currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()}</span>
                                     <Badge variant="outline" className="bg-white text-xs font-normal">{isOwedToMe ? "Owed to You" : "You Owe"}</Badge>
-                                    {c.is_pending && <CloudOff className="w-3 h-3 text-amber-500" />}
                                 </div>
                                 <p className="text-xs text-slate-500 mt-1 font-medium">{c.notes} <span className="opacity-50">• {isOwedToMe ? c.borrower_name : c.lender_name}</span></p>
                             </div>
@@ -526,19 +516,16 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
                 })}
             </Card>
             <Card className="p-5 bg-slate-50 border-slate-200">
-                <div className="bg-white border border-slate-200 p-2 mb-4 rounded-lg text-xs text-slate-500 flex gap-2 items-start"><Info className="w-4 h-4 shrink-0 mt-0.5" /><div>Track IOU's here.</div></div>
+                <div className="bg-white border border-slate-200 p-2 mb-4 rounded-lg text-xs text-slate-500 flex gap-2 items-start"><Info className="w-4 h-4 shrink-0 mt-0.5" /><div>Track IOU's here. Manual names = Personal.</div></div>
                 <form onSubmit={handleAddCredit} className="space-y-3"><div className="grid grid-cols-2 gap-3"><Button type="button" variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button><Button type="button" variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button></div><div className="grid grid-cols-2 gap-3"><Input type="number" placeholder={`Amount (${currencySymbol})`} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required className="bg-white h-10" /><Input placeholder={partnerId && !isSingleUser ? "Partner (Default)" : "Name (e.g. Bank)"} value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} disabled={!!(partnerId && !isSingleUser)} className="bg-white h-10" /></div><Input placeholder="What for? (e.g. Dinner)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-white h-10" /><Button type="submit" className="w-full bg-slate-900 text-white h-11 font-bold">Log Debt</Button></form></Card>
             {settledCredits.length > 0 && (<Accordion type="single" collapsible className="bg-white rounded-xl border border-slate-100 px-4"><AccordionItem value="settled" className="border-none"><AccordionTrigger className="text-slate-500 hover:no-underline text-sm">Settled History</AccordionTrigger><AccordionContent>{settledCredits.map(c => (<div key={c.id} className="flex justify-between py-2 border-b border-slate-50 last:border-0 text-xs text-slate-400"><span>{c.lender_user_id === user.id ? "Was Owed" : "Did Owe"} {currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()} - {c.notes}</span><Trash2 className="w-3 h-3 cursor-pointer hover:text-rose-500" onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, action: 'delete' })} /></div>))}</AccordionContent></AccordionItem></Accordion>)}
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title={deleteConfirm?.action === 'settle' ? "Settle Debt?" : "Delete Entry?"} description="Confirm action." onConfirm={handleAction} />
 
-            {/* ⚡ FIX: Improved Edit Credit Dialog */}
             <Dialog open={!!editingCredit} onOpenChange={() => setEditingCredit(null)}>
                 {editingCredit && (
                     <DialogContent className="sm:max-w-sm">
                         <DialogHeader><DialogTitle>Manage Debt</DialogTitle><DialogDescription>Edit or Settle this debt.</DialogDescription></DialogHeader>
-
                         <EditCreditForm credit={editingCredit} userId={user.id} onUpdate={handleUpdateCredit} partnerId={partnerId} isSingleUser={isSingleUser} currencySymbol={currencySymbol} />
-
                         <div className="flex gap-2 mt-2 pt-2 border-t border-slate-100">
                             <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingCredit.id, action: 'settle' }); setEditingCredit(null); }}>Mark Settled</Button>
                             <Button variant="ghost" className="flex-none text-rose-500 hover:bg-rose-50" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingCredit.id, action: 'delete' }); setEditingCredit(null); }}><Trash2 className="w-4 h-4" /></Button>
@@ -550,7 +537,6 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
     )
 }
 
-// ⚡ NEW: Dedicated Edit Form for Credits to handle "Who Owes Who" logic
 function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, currencySymbol }: any) {
     const isOriginallyOwedToMe = credit.lender_user_id === userId;
     const [form, setForm] = useState({
@@ -560,7 +546,6 @@ function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, cur
         personName: isOriginallyOwedToMe ? credit.borrower_name : credit.lender_name
     });
 
-    // If it's a partner debt, we hide the name field usually, unless user wants to manually override
     const isSystemUser = (isOriginallyOwedToMe && credit.borrower_user_id) || (!isOriginallyOwedToMe && credit.lender_user_id);
 
     return (
@@ -575,13 +560,7 @@ function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, cur
             </div>
             <div>
                 <Label>Person / Entity</Label>
-                <Input
-                    value={form.personName}
-                    onChange={e => setForm({ ...form, personName: e.target.value })}
-                    // Disable edit if it's linked to a real partner user to prevent desync, unless user wants to switch to manual? 
-                    // User asked to "customize or change the name". So we enable it but hint it might disconnect user link.
-                    placeholder="Name"
-                />
+                <Input value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} placeholder="Name" />
                 {isSystemUser && <p className="text-[10px] text-slate-400 mt-1">Currently linked to Partner.</p>}
             </div>
             <div>

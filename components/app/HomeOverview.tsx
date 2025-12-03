@@ -38,7 +38,7 @@ const getProgressTextColor = (percent: number) => {
     return "text-rose-600";
 };
 
-export function HomeOverview({ user, household, currencySymbol, hideBalances, refreshTrigger }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number }) {
+export function HomeOverview({ user, household, currencySymbol, hideBalances, refreshTrigger, viewScope }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number, viewScope: 'unified' | 'household' | 'solo' }) {
     const [loading, setLoading] = useState(true)
     const [usingCachedData, setUsingCachedData] = useState(false);
 
@@ -54,7 +54,9 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
 
     useEffect(() => {
         async function fetchData() {
-            const cacheKey = CACHE_KEYS.DASHBOARD_STATS(household.id);
+            // ⚡ CACHE: Append scope to key so we don't show "Unified" data when in "Solo" mode
+            const baseKey = CACHE_KEYS.DASHBOARD_STATS(household.id);
+            const cacheKey = `${baseKey}_${viewScope}`;
 
             // 1. Try Cache
             const cached = loadFromCache<any>(cacheKey);
@@ -68,21 +70,30 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
             }
 
             try {
-                // 2. Fetch Dashboard Stats (RPC)
+                // 2. Fetch Dashboard Stats (RPC) with Scope Filter
                 const { data: dashboardData, error: rpcError } = await supabase.rpc('get_global_dashboard_data', {
                     target_household_id: household.id,
-                    current_user_id: user.id
+                    current_user_id: user.id,
+                    scope_filter: viewScope // ⚡ PASS SCOPE
                 });
 
                 if (rpcError) throw rpcError;
 
                 // 3. Fetch Recent Expenses (for flexible charts)
-                // We fetch enough history to handle "All Time" or at least last year for trends
-                const { data: expenseData, error: expError } = await supabase
+                let expenseQuery = supabase
                     .from('expenses')
                     .select('amount, category, expense_date')
                     .eq('household_id', household.id)
                     .order('expense_date', { ascending: false });
+
+                // ⚡ APPLY SCOPE FILTER TO EXPENSE LIST
+                if (viewScope === 'household') {
+                    expenseQuery = expenseQuery.eq('scope', 'household');
+                } else if (viewScope === 'solo') {
+                    expenseQuery = expenseQuery.eq('scope', 'personal');
+                }
+
+                const { data: expenseData, error: expError } = await expenseQuery;
 
                 if (expError) throw expError;
 
@@ -112,7 +123,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
         }
 
         fetchData();
-    }, [household.id, user.id, refreshTrigger]);
+    }, [household.id, user.id, refreshTrigger, viewScope]); // ⚡ Re-fetch when scope changes
 
 
     // --- PROCESSED CHART DATA ---
@@ -125,7 +136,6 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
         const currentMonth = now.getMonth();
         const currentYear = now.getFullYear();
 
-        // Calculate Last Month correctly handling Jan -> Dec rollback
         const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
         const lastMonthIdx = lastMonthDate.getMonth();
         const lastMonthYear = lastMonthDate.getFullYear();
@@ -137,14 +147,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                 const d = new Date(e.expense_date);
                 return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
             });
-
-            // Fallback Logic: If no data for this month, default to ALL (as requested)
-            if (filtered.length === 0) {
-                // Check if we should fallback visually or just show empty. 
-                // Request said "if no data use all time as default". 
-                // We'll override the filtered set to ALL, but keep the filter state as 'this_month' in UI.
-                filtered = allExpenses;
-            }
+            if (filtered.length === 0) filtered = allExpenses; // Fallback
         } else if (categoryFilter === 'last_month') {
             filtered = allExpenses.filter(e => {
                 const d = new Date(e.expense_date);
@@ -174,7 +177,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
     }, [allExpenses]);
 
 
-    if (loading) return <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
+    if (loading && !usingCachedData) return <div className="flex justify-center p-12"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
 
     const formatMoney = (amount: number) => {
         if (hideBalances) return `${currencySymbol}****`;
@@ -215,13 +218,15 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         </CardHeader>
                         <CardContent className="p-4 pt-1 relative z-10">
                             <div className={`text-2xl font-bold tracking-tight ${isBalanced ? 'text-emerald-600' : (netPositive ? 'text-emerald-700' : 'text-rose-700')}`}>
-                                {isBalanced ? 'Settled' : (hideBalances ? '****' : (netPositive ? '+' : '-') + currencySymbol + Math.abs(stats.netBalance).toLocaleString())}
+                                {/* ⚡ FIX: Show 0 instead of Settled text, handle hidden balances */}
+                                {hideBalances ? '****' : (isBalanced ? `${currencySymbol}0` : (netPositive ? '+' : '-') + currencySymbol + Math.abs(stats.netBalance).toLocaleString())}
                             </div>
                             {!isBalanced && (
                                 <p className="text-[10px] text-slate-400 mt-0.5 font-medium truncate">
                                     {netPositive ? "You are owed" : "You owe"}
                                 </p>
                             )}
+                            {isBalanced && <p className="text-[10px] text-slate-400 mt-0.5 font-medium truncate">All settled up</p>}
                         </CardContent>
                     </Card>
 

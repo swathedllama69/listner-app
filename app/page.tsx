@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import { supabase, saveDeviceTokenToDB } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { User } from '@supabase/supabase-js';
 import { Dashboard } from '@/components/app/Dashboard';
 import { OnboardingScreen } from '@/components/app/OnboardingScreen';
@@ -41,19 +41,18 @@ function AuthWrapper() {
   const [debugMsg, setDebugMsg] = useState("Initializing...");
   const [errorDetails, setErrorDetails] = useState("");
 
-  // New State for Subtle Reconnecting (kept for logic, but UI removed as requested)
+  // New State for Subtle Reconnecting
   const [isReconnecting, setIsReconnecting] = useState(false);
 
-  // Refs for State Access in Listeners (Prevents Stale Closures)
+  // Refs for State Access
   const stageRef = useRef(stage);
   const userRef = useRef(user);
 
-  // Ref to prevent race conditions during Deep Link Login
+  // Deep Link Refs
   const isProcessingDeepLink = useRef(false);
   const processedUrls = useRef<Set<string>>(new Set());
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Update Refs when state changes
   useEffect(() => { stageRef.current = stage; }, [stage]);
   useEffect(() => { userRef.current = user; }, [user]);
 
@@ -61,41 +60,46 @@ function AuthWrapper() {
   const setupPushNotifications = async (currentUser: User) => {
     if (!Capacitor.isNativePlatform()) return;
 
-    let permStatus = await PushNotifications.checkPermissions();
-    if (permStatus.receive !== 'granted') {
-      permStatus = await PushNotifications.requestPermissions();
+    try {
+      let permStatus = await PushNotifications.checkPermissions();
+      if (permStatus.receive !== 'granted') {
+        permStatus = await PushNotifications.requestPermissions();
+      }
+
+      if (permStatus.receive !== 'granted') return;
+
+      await PushNotifications.register();
+      await PushNotifications.createChannel({
+        id: 'PushNotifications',
+        name: 'General Notifications',
+        importance: 5,
+        visibility: 1,
+        sound: 'default',
+        vibration: true,
+      });
+
+      await PushNotifications.removeAllListeners();
+
+      PushNotifications.addListener('registration', async (token) => {
+        // Save to 'device_tokens' table
+        await supabase.from('device_tokens').upsert({ user_id: currentUser.id, token: token.value }, { onConflict: 'token' });
+      });
+
+      PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+        const data = action.notification.data;
+        if (data?.link) (async () => { await (App as any).openUrl({ url: data.link }); })();
+      });
+    } catch (e) {
+      console.error("Push Setup Error:", e);
     }
-
-    if (permStatus.receive !== 'granted') return;
-
-    await PushNotifications.register();
-    await PushNotifications.createChannel({
-      id: 'PushNotifications',
-      name: 'General Notifications',
-      importance: 5,
-      visibility: 1,
-      sound: 'default',
-      vibration: true,
-    });
-
-    await PushNotifications.removeAllListeners();
-
-    PushNotifications.addListener('registration', async (token) => {
-      await saveDeviceTokenToDB(currentUser.id, token.value, 'android');
-    });
-
-    PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-      const data = action.notification.data;
-      if (data?.link) (async () => { await (App as any).openUrl({ url: data.link }); })();
-    });
   };
 
-  // --- 1. CORE DATA FETCHING (Now with Cache First) ---
+  // --- 1. CORE DATA FETCHING ---
   const loadUserData = async (currentUser: User) => {
     const userCacheKey = CACHE_KEYS.USER_PROFILE(currentUser.id);
     const householdCacheKey = CACHE_KEYS.HOUSEHOLD(currentUser.id);
 
-    // --- STEP A: TRY LOAD FROM CACHE IMMEDIATELY ---
+    // TRY CACHE FIRST
     const cachedUser = loadFromCache<UserProfile>(userCacheKey);
     const cachedHousehold = loadFromCache<Household>(householdCacheKey);
 
@@ -103,13 +107,12 @@ function AuthWrapper() {
       console.log("⚡ Loaded from cache");
       setUser(cachedUser);
       setHousehold(cachedHousehold);
-      // Only set stage if we aren't deep linking
       if (!isProcessingDeepLink.current) {
         setStage('APP');
       }
     }
 
-    // --- STEP B: FETCH FROM NETWORK ---
+    // FETCH FROM NETWORK
     try {
       if (!isReconnecting) setDebugMsg("Loading Profile...");
 
@@ -121,14 +124,6 @@ function AuthWrapper() {
       }
 
       await supabase.from('profiles').update({ last_active_at: new Date().toISOString(), app_version: appVersion }).eq('id', currentUser.id);
-
-      // Online Tracking
-      const channel = supabase.channel('online-users');
-      channel.subscribe(async (status) => {
-        if (status === 'SUBSCRIBED') {
-          await channel.track({ user_id: currentUser.id, online_at: new Date().toISOString() });
-        }
-      });
 
       let username = currentUser.email?.split('@')[0] || 'user';
       if (username.length < 3) username = username + '_user';
@@ -163,7 +158,7 @@ function AuthWrapper() {
       saveToCache(userCacheKey, mergedUser);
       if (currentHousehold) saveToCache(householdCacheKey, currentHousehold);
 
-      // Only change stage if we aren't already in the app flow (avoids flickering)
+      // Transition Stage
       if (stage !== 'APP') {
         if (currentHousehold) {
           setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
@@ -176,12 +171,10 @@ function AuthWrapper() {
 
     } catch (err: any) {
       console.error("💥 LOAD ERROR:", err);
-      // If we have cached data, we stay in APP mode and just log the error
       if (cachedUser && cachedHousehold) {
-        console.warn("Network failed, but running on cached data.");
+        console.warn("Network failed, staying on cached data.");
         return;
       }
-      // Only throw if we have NOTHING to show
       throw err;
     }
   };
@@ -192,8 +185,6 @@ function AuthWrapper() {
     processedUrls.current.add(url);
 
     isProcessingDeepLink.current = true;
-
-    console.log("🔗 Deep Link Detected:", url);
     setStage('LOADING');
     setDebugMsg("Authenticating...");
 
@@ -233,7 +224,7 @@ function AuthWrapper() {
     }
   };
 
-  // --- CONNECTION & RESUME LOGIC ---
+  // --- CONNECTION LOGIC ---
   const attemptReconnect = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
@@ -241,7 +232,6 @@ function AuthWrapper() {
       try {
         await loadUserData(session.user);
       } catch (err) {
-        console.warn("Reconnect failed, retrying in 3s...");
         if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
         retryTimeoutRef.current = setTimeout(attemptReconnect, 3000);
       }
@@ -270,7 +260,7 @@ function AuthWrapper() {
     }
   };
 
-  // --- 3. LISTENERS SETUP ---
+  // --- 3. LISTENERS ---
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       App.removeAllListeners();
@@ -296,8 +286,7 @@ function AuthWrapper() {
     }
   }, []);
 
-
-  // --- 4. INITIAL AUTH CHECK ---
+  // --- 4. INITIAL AUTH ---
   useEffect(() => {
     let mounted = true;
     const init = async () => {
@@ -309,12 +298,9 @@ function AuthWrapper() {
           if (session?.user) {
             await loadUserData(session.user);
           } else {
-            if (!isProcessingDeepLink.current) {
-              setStage('AUTH');
-            }
+            if (!isProcessingDeepLink.current) setStage('AUTH');
           }
         } catch (err: any) {
-          console.error("Initial load failed, retrying...");
           setTimeout(init, 3000);
         }
       }
@@ -326,9 +312,20 @@ function AuthWrapper() {
       else if (event === 'SIGNED_OUT') window.location.reload();
     });
 
-    return () => { mounted = false; subscription.unsubscribe(); };
+    // ⚡ TIMEOUT: Increased to 60s
+    const timeout = setTimeout(() => {
+      if (stage === 'LOADING') {
+        console.warn("⚠️ App stuck on loading. Resetting...");
+        setStage('AUTH');
+      }
+    }, 60000);
+
+    return () => { mounted = false; subscription.unsubscribe(); clearTimeout(timeout); };
   }, []);
 
+  // --- TUTORIAL HANDLERS ---
+
+  // Permanent completion (saves to DB)
   const handleTutorialComplete = async () => {
     if (!user) return;
     setUser({ ...user, has_seen_tutorial: true });
@@ -337,6 +334,12 @@ function AuthWrapper() {
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
   };
 
+  // Temporary close (shows again next time)
+  const handleTutorialClose = () => {
+    setStage(household ? 'APP' : 'SETUP_HOUSEHOLD');
+  };
+
+  // Safe area padding for non-app screens
   const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
 
   switch (stage) {
@@ -361,12 +364,19 @@ function AuthWrapper() {
     );
     case 'WELCOME': return <OnboardingScreen onStart={() => setStage('AUTH')} />;
     case 'AUTH': return <div className={safeAreaWrapper}><AuthPage /></div>;
-    case 'TUTORIAL': return <div className={safeAreaWrapper}><Tutorial onComplete={handleTutorialComplete} /></div>;
+    case 'TUTORIAL': return (
+      <div className={safeAreaWrapper}>
+        <Tutorial
+          onComplete={handleTutorialComplete}
+          onClose={handleTutorialClose} // ⚡ Connected close handler
+        />
+      </div>
+    );
     case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => loadUserData(u)} /></div>;
 
     case 'APP':
       return (
-        // UPDATED: Removed pt-[env(safe-area-inset-top)] so app fills status bar area
+        // Dashboard handles its own safe area spacing (pt-4/pt-12)
         <div className="relative min-h-screen flex flex-col w-full pb-[env(safe-area-inset-bottom)]">
           {user && household && <Dashboard user={user} household={household} />}
         </div>
@@ -392,6 +402,8 @@ function AuthPage() {
     { title: "One-Stop Finance", desc: "Easily track shared expenses and automate IOU calculations instantly.", icon: Wallet, color: "bg-emerald-500" },
     { title: "Fully Secured", desc: "Your financial and household data is protected with enterprise-grade encryption.", icon: ShieldCheck, color: "bg-indigo-500" },
   ];
+
+  // ⚡ OPTIMIZED ANIMATIONS (Floating Items Preserved, Background Blobs Removed for Performance)
   const animationItems = [
     { type: '🍎', size: 10, duration: 18, delay: 0, top: '10%', left: '10%', animKey: 'slowDrift1', isEmoji: true, opacity: 0.25 },
     { type: '💵', size: 14, duration: 18, delay: 10, bottom: '10%', left: '40%', animKey: 'slowDrift3', isEmoji: true, opacity: 0.15 },
@@ -471,27 +483,28 @@ function AuthPage() {
   return (
     <div className="relative flex-1 flex overflow-hidden bg-slate-50">
       <style jsx global>{`
-                @keyframes blob { 0%, 100% { transform: translate(0, 0) scale(1); } 25% { transform: translate(-200px, 150px) scale(1.1); } 50% { transform: translate(250px, -150px) scale(0.9); } 75% { transform: translate(-150px, -100px) scale(1.2); } }
-                .animation-delay-2000 { animation-delay: 2s; }
-                .animation-delay-4000 { animation-delay: 4s; }
-                @keyframes slowDrift1 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 33% { transform: translate(10vw, 20vh) rotate(10deg); } 66% { transform: translate(-15vw, 5vh) rotate(-5deg); } }
-                @keyframes slowDrift2 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(-10vw, -10vh) rotate(-10deg); } 80% { transform: translate(10vw, 15vh) rotate(5deg); } }
-                @keyframes slowDrift3 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 20% { transform: translate(25vw, -5vh) rotate(15deg); } 70% { transform: translate(-5vw, 25vh) rotate(-15deg); } }
-                @keyframes slowDrift4 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(-20vw, 10vh) rotate(20deg); } }
-                @keyframes slowDrift5 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 60% { transform: translate(5vw, -20vh) rotate(-10deg); } }
-                @keyframes slowDrift6 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 30% { transform: translate(-15vw, -5vh) rotate(5deg); } }
-                @keyframes slowDrift7 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 70% { transform: translate(10vw, 10vh) rotate(-20deg); } }
-                @keyframes slowDrift8 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 45% { transform: translate(-10vw, -20vh) rotate(10deg); } }
-                @keyframes slowDrift9 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 55% { transform: translate(20vw, -10vh) rotate(-5deg); } }
-                @keyframes slowDrift10 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 30% { transform: translate(-20vw, 5vh) rotate(15deg); } 60% { transform: translate(5vw, -10vh) rotate(-5deg); } }
-                @keyframes slowDrift11 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(15vw, 15vh) rotate(-10deg); } 80% { transform: translate(-5vw, -10vh) rotate(5deg); } }
-                @keyframes slowDrift12 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 25% { transform: translate(10vw, -25vh) rotate(5deg); } 75% { transform: translate(-10vw, 15vh) rotate(-15deg); } }
-                @keyframes slowDrift13 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(-5vw, 15vh) rotate(-5deg); } }
-                @keyframes slowDrift14 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 65% { transform: translate(10vw, -10vh) rotate(10deg); } }
-                @keyframes slowDrift15 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 35% { transform: translate(-15vw, 10vh) rotate(-10deg); } }
-            `}</style>
+        @keyframes slowDrift1 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 33% { transform: translate(10vw, 20vh) rotate(10deg); } 66% { transform: translate(-15vw, 5vh) rotate(-5deg); } }
+        @keyframes slowDrift2 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(-10vw, -10vh) rotate(-10deg); } 80% { transform: translate(10vw, 15vh) rotate(5deg); } }
+        @keyframes slowDrift3 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 20% { transform: translate(25vw, -5vh) rotate(15deg); } 70% { transform: translate(-5vw, 25vh) rotate(-15deg); } }
+        @keyframes slowDrift4 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(-20vw, 10vh) rotate(20deg); } }
+        @keyframes slowDrift5 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 60% { transform: translate(5vw, -20vh) rotate(-10deg); } }
+        @keyframes slowDrift6 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 30% { transform: translate(-15vw, -5vh) rotate(5deg); } }
+        @keyframes slowDrift7 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 70% { transform: translate(10vw, 10vh) rotate(-20deg); } }
+        @keyframes slowDrift8 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 45% { transform: translate(-10vw, -20vh) rotate(10deg); } }
+        @keyframes slowDrift9 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 55% { transform: translate(20vw, -10vh) rotate(-5deg); } }
+        @keyframes slowDrift10 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 30% { transform: translate(-20vw, 5vh) rotate(15deg); } 60% { transform: translate(5vw, -10vh) rotate(-5deg); } }
+        @keyframes slowDrift11 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(15vw, 15vh) rotate(-10deg); } 80% { transform: translate(-5vw, -10vh) rotate(5deg); } }
+        @keyframes slowDrift12 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 25% { transform: translate(10vw, -25vh) rotate(5deg); } 75% { transform: translate(-10vw, 15vh) rotate(-15deg); } }
+        @keyframes slowDrift13 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(-5vw, 15vh) rotate(-5deg); } }
+        @keyframes slowDrift14 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 65% { transform: translate(10vw, -10vh) rotate(10deg); } }
+        @keyframes slowDrift15 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 35% { transform: translate(-15vw, 10vh) rotate(-10deg); } }
+      `}</style>
       <div className="absolute inset-0 z-0">
+        {/* ⚡ REPLACED HEAVY BLOBS WITH STATIC GRADIENT FOR PERFORMANCE */}
         <div className="absolute inset-0 bg-gradient-to-br from-teal-50 via-white to-indigo-50 opacity-80"></div>
+        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-5"></div>
+
+        {/* ⚡ FLOATING ITEMS PRESERVED */}
         {animationItems.map((item, index) => {
           const sizeInPixels = item.size * (item.isEmoji ? 6 : 4.5);
           const IconComponent = item.Icon;
@@ -504,6 +517,7 @@ function AuthPage() {
       </div>
 
       <div className="relative z-10 w-full flex flex-col lg:flex-row">
+        {/* DESKTOP SIDE PANEL */}
         <div className="hidden lg:flex w-1/2 h-screen flex-col justify-between p-16 text-slate-800 bg-slate-100/50">
           <div className="flex items-center gap-4">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-32 h-32 object-contain" />
@@ -524,6 +538,7 @@ function AuthPage() {
           <div className="text-xs text-slate-400">© 2025 ListNer Inc.</div>
         </div>
 
+        {/* MOBILE / FORM CONTAINER */}
         <div className="w-full lg:w-1/2 h-full flex flex-col items-center justify-center p-6">
           <div className="lg:hidden mb-8 flex flex-col items-center">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-16 h-16 mb-4 object-contain" />
