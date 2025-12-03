@@ -25,7 +25,6 @@ import { SyncQueue } from "@/lib/syncQueue"
 import { Progress } from "@/components/ui/progress"
 import { Capacitor } from "@capacitor/core"
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
-// ⚡ NEW: Virtual Scrolling
 import { Virtuoso } from 'react-virtuoso'
 
 type ShoppingItem = {
@@ -96,9 +95,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const [listSettings, setListSettings] = useState({ name: list.name, isPrivate: list.is_private })
     const [form, setForm] = useState({ name: "", quantity: "1", price: "", notes: "", priority: "Medium" })
 
-    // ⚡ PAGINATION STATE
-    const LIMIT = 50; // Auto-load limit
-    const [visibleCount, setVisibleCount] = useState(20); // Start with 20
+    const LIMIT = 50;
+    const [visibleCount, setVisibleCount] = useState(20);
 
     const inputRef = useRef<HTMLInputElement>(null)
 
@@ -130,8 +128,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 setIsLoading(true);
             }
 
-            // Fetch ALL items initially (Database is fast enough for text data under 10k rows)
-            // We handle virtualization on Client Side for smoother UX
             const { data, error } = await supabase.from("shopping_items").select("*").eq("list_id", list.id);
 
             if (!error && data) {
@@ -196,12 +192,11 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         triggerHaptic(ImpactStyle.Medium);
         if (!deleteConfirm) return;
         if (deleteConfirm.type === 'item' && deleteConfirm.id) {
-            // Optimistic Delete
             const oldItems = [...items];
             setItems(items.filter(item => item.id !== deleteConfirm.id));
 
             const { error } = await supabase.from("shopping_items").delete().eq("id", deleteConfirm.id);
-            if (error) setItems(oldItems); // Revert
+            if (error) setItems(oldItems);
 
         } else if (deleteConfirm.type === 'list') {
             await supabase.from('lists').delete().eq('id', list.id);
@@ -213,7 +208,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             setSelectedItems([]);
 
             const { error } = await supabase.from("shopping_items").delete().in("id", toDelete);
-            if (error) setItems(oldItems); // Revert
+            if (error) setItems(oldItems);
 
         } else if (deleteConfirm.type === 'completed') {
             const completedIds = items.filter(i => i.is_complete).map(i => i.id);
@@ -221,12 +216,11 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             setItems(items.filter(i => !i.is_complete));
 
             const { error } = await supabase.from("shopping_items").delete().in("id", completedIds);
-            if (error) setItems(oldItems); // Revert
+            if (error) setItems(oldItems);
         }
         setDeleteConfirm(null);
     }
 
-    // --- FAIL-SAFE ADD ITEM LOGIC ---
     const handleAddItem = async (e?: FormEvent) => {
         if (e) e.preventDefault();
         if (form.name.trim() === "") return;
@@ -246,9 +240,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             priority: form.priority
         };
 
-        // Optimistic Update
         const tempItem: ShoppingItem = {
-            id: -Date.now(), // Temp ID
+            id: -Date.now(),
             created_at: new Date().toISOString(),
             is_complete: false,
             is_pending: true,
@@ -259,11 +252,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         setItems(newItems);
         saveToCache(CACHE_KEYS.SHOPPING_LIST(list.id), newItems);
 
-        // Reset Form & Keep Focus
         setForm({ name: "", quantity: "1", price: "", notes: "", priority: "Medium" });
         inputRef.current?.focus();
-        // Don't close dialog if adding multiple, but user might want to close manually or use FAB
-        // setIsAddOpen(false); 
 
         const executeOfflineSave = () => {
             SyncQueue.add({
@@ -274,23 +264,20 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             triggerNotificationHaptic(NotificationType.Success);
         };
 
-        // Try Online First
         if (navigator.onLine) {
             try {
                 const { data, error } = await supabase.from("shopping_items").insert(newItemPayload).select().single();
 
                 if (error) throw error;
 
-                // Replace Temp with Real
                 setItems(prev => prev.map(i => i.id === tempItem.id ? data as ShoppingItem : i));
-                // Update cache with real ID
                 const updatedItems = newItems.map(i => i.id === tempItem.id ? data as ShoppingItem : i);
                 saveToCache(CACHE_KEYS.SHOPPING_LIST(list.id), updatedItems);
 
                 triggerNotificationHaptic(NotificationType.Success);
             } catch (err) {
                 console.warn("Online save failed, falling back to offline mode.", err);
-                executeOfflineSave(); // Fallback to offline queue
+                executeOfflineSave();
             }
         } else {
             executeOfflineSave();
@@ -300,7 +287,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const handleUpdateItem = async (updatedItem: any) => {
         if (!editingItem) return;
 
-        // Optimistic Update
         setItems(prev => prev.map(i => i.id === editingItem.id ? { ...i, ...updatedItem } : i));
         setEditingItem(null);
 
@@ -311,7 +297,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         }).eq('id', editingItem.id).select().single();
 
         if (error) {
-            // Revert? Or just show alert
             showAlert("Error", "Update failed: " + error.message);
         }
     }
@@ -319,25 +304,22 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const toggleComplete = async (item: ShoppingItem) => {
         triggerHaptic(ImpactStyle.Light);
 
-        // Optimistic Update
         const newStatus = !item.is_complete;
         setItems(items.map(i => i.id === item.id ? { ...i, is_complete: newStatus } : i));
 
         const { error } = await supabase.from("shopping_items").update({ is_complete: newStatus }).eq("id", item.id)
         if (error) {
-            // Revert
             setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !newStatus } : i));
         }
     }
 
     const handleDeleteItem = async (itemId: number) => {
         triggerHaptic(ImpactStyle.Medium);
-        // Optimistic
         const oldItems = [...items];
         setItems(items.filter(item => item.id !== itemId));
 
         const { error } = await supabase.from("shopping_items").delete().eq("id", itemId)
-        if (error) setItems(oldItems); // Revert
+        if (error) setItems(oldItems);
     }
 
     const toggleSelectItem = (itemId: number) => setSelectedItems(prev => prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]);
@@ -345,7 +327,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         if (selectedItems.length === 0) return;
         triggerHaptic(ImpactStyle.Medium);
 
-        // Optimistic
         setItems(items.map(i => selectedItems.includes(i.id) ? { ...i, is_complete: true } : i));
         setSelectedItems([]);
 
@@ -362,12 +343,11 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
-    // ⚡ PAGINATION LOGIC
     const visibleItems = processedItems.slice(0, visibleCount);
     const hasMore = visibleCount < processedItems.length;
 
     const loadMore = () => {
-        setVisibleCount(prev => Math.min(prev + 25, processedItems.length)); // Load next 20
+        setVisibleCount(prev => Math.min(prev + 25, processedItems.length));
     };
 
     const completedItems = items.filter(item => item.is_complete);
@@ -383,8 +363,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
     return (
         <Card className={`w-full rounded-2xl shadow-xl bg-white/80 backdrop-blur-sm relative border-none min-h-[80vh] flex flex-col transition-opacity duration-500 ${usingCachedData ? 'opacity-90 grayscale-[10%]' : ''}`}>
-            {/* Header Section */}
-            <div className="sticky top-[72px] z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden">
+            {/* Header Section - Tweaked top margin so it fits closer to back button */}
+            <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
 
                 <div className="relative z-10">
@@ -439,7 +419,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                             <DropdownMenuItem onClick={() => setIsRenameOpen(true)}><Pencil className="w-4 h-4 mr-2" /> Rename</DropdownMenuItem>
                             <DropdownMenuItem onClick={handleTogglePrivacy}><Globe className="w-4 h-4 mr-2" /> {listSettings.isPrivate ? "Make Public" : "Make Private"}</DropdownMenuItem>
                             <DropdownMenuSeparator />
-                            {/* Clear Completed Option */}
                             {completedItems.length > 0 && (
                                 <DropdownMenuItem className="text-rose-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'completed' })}>
                                     <Trash2 className="w-4 h-4 mr-2" /> Clear Completed
@@ -454,10 +433,9 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             <CardContent className="pt-4 pb-32 flex-1 px-2 md:px-6">
                 {isLoading ? <p className="text-center py-8 text-slate-400">Loading...</p> : (
                     <>
-                        {/* ⚡ VIRTUAL LIST IMPLEMENTATION */}
                         {visibleItems.length > 0 ? (
                             <Virtuoso
-                                style={{ height: '100%', minHeight: '400px' }} // Give it height
+                                style={{ height: '100%', minHeight: '400px' }}
                                 useWindowScroll
                                 data={visibleItems}
                                 itemContent={(index, item) => {
@@ -538,7 +516,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
             <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center transition-all hover:scale-105 active:scale-95" icon={Plus} />
 
-            {/* ADD DIALOG */}
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl top-[20%] translate-y-0">
                     <DialogHeader><DialogTitle>Add Shopping Item</DialogTitle></DialogHeader>
@@ -558,14 +535,12 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 </DialogContent>
             </Dialog>
 
-            {/* EDIT DIALOG */}
             <Dialog open={!!editingItem} onOpenChange={() => setEditingItem(null)}>{editingItem && <EditShoppingItemForm item={editingItem} onUpdate={handleUpdateItem} onClose={() => setEditingItem(null)} currencySymbol={currencySymbol} />}</Dialog>
 
             <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}><DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>Rename List</DialogTitle></DialogHeader><div className="flex gap-2 py-2"><Input value={listSettings.name} onChange={e => setListSettings({ ...listSettings, name: e.target.value })} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div></DialogContent></Dialog>
 
             {isBulkMode && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-4 py-3 rounded-full shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-5"><span className="font-bold text-sm whitespace-nowrap">{selectedItems.length} selected</span><div className="h-4 w-[1px] bg-slate-700"></div><button onClick={handleBulkComplete} className="text-emerald-400 font-medium flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Done</button><button onClick={() => setDeleteConfirm({ isOpen: true, type: 'bulk' })} className="text-rose-400 font-medium flex items-center gap-1"><Trash2 className="w-4 h-4" /> Delete</button><button onClick={() => setSelectedItems([])} className="text-slate-400 ml-2">Cancel</button></div>}
 
-            {/* ALERT DIALOG */}
             <AlertDialog isOpen={alertInfo.isOpen} onOpenChange={(o) => setAlertInfo({ ...alertInfo, isOpen: o })} title={alertInfo.title} description={alertInfo.desc} />
 
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete?" description={deleteConfirm?.type === 'completed' ? "Remove all completed items?" : "Irreversible."} onConfirm={handleDelete} />
@@ -589,7 +564,6 @@ function EditShoppingItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
                     <div><Label>Price ({currencySymbol})</Label><Input type="number" value={form.price} onChange={handleChange} name="price" className="h-11" autoComplete="off" /></div>
                     <div>
                         <Label>Priority</Label>
-                        {/* FIX APPLIED BELOW: added 'as any' to the value change */}
                         <Select value={form.priority as any} onValueChange={(v) => setForm({ ...form, priority: v as any })}>
                             <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
                             <SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>

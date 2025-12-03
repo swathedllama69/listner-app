@@ -314,7 +314,8 @@ function AuthWrapper() {
 
     // ⚡ TIMEOUT: Increased to 60s
     const timeout = setTimeout(() => {
-      if (stage === 'LOADING') {
+      // 🔥 CRITICAL FIX: Use stageRef.current to get real-time state
+      if (stageRef.current === 'LOADING') {
         console.warn("⚠️ App stuck on loading. Resetting...");
         setStage('AUTH');
       }

@@ -41,6 +41,7 @@ const getProgressTextColor = (percent: number) => {
 export function HomeOverview({ user, household, currencySymbol, hideBalances, refreshTrigger, viewScope }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number, viewScope: 'unified' | 'household' | 'solo' }) {
     const [loading, setLoading] = useState(true)
     const [usingCachedData, setUsingCachedData] = useState(false);
+    const [showOfflineIndicator, setShowOfflineIndicator] = useState(false);
 
     // FILTERS
     const [categoryFilter, setCategoryFilter] = useState<'this_month' | 'last_month' | 'all'>('this_month');
@@ -52,9 +53,22 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
     })
     const [allExpenses, setAllExpenses] = useState<any[]>([]); // Raw expenses for flexible charting
 
+    // Offline Indicator Delay
+    useEffect(() => {
+        let timeout: NodeJS.Timeout;
+        if (usingCachedData) {
+            timeout = setTimeout(() => {
+                setShowOfflineIndicator(true);
+            }, 3000);
+        } else {
+            setShowOfflineIndicator(false);
+        }
+        return () => clearTimeout(timeout);
+    }, [usingCachedData]);
+
     useEffect(() => {
         async function fetchData() {
-            // ⚡ CACHE: Append scope to key so we don't show "Unified" data when in "Solo" mode
+            // CACHE: Append scope to key so we don't show "Unified" data when in "Solo" mode
             const baseKey = CACHE_KEYS.DASHBOARD_STATS(household.id);
             const cacheKey = `${baseKey}_${viewScope}`;
 
@@ -74,7 +88,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                 const { data: dashboardData, error: rpcError } = await supabase.rpc('get_global_dashboard_data', {
                     target_household_id: household.id,
                     current_user_id: user.id,
-                    scope_filter: viewScope // ⚡ PASS SCOPE
+                    scope_filter: viewScope // PASS SCOPE
                 });
 
                 if (rpcError) throw rpcError;
@@ -86,7 +100,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                     .eq('household_id', household.id)
                     .order('expense_date', { ascending: false });
 
-                // ⚡ APPLY SCOPE FILTER TO EXPENSE LIST
+                // APPLY SCOPE FILTER TO EXPENSE LIST
                 if (viewScope === 'household') {
                     expenseQuery = expenseQuery.eq('scope', 'household');
                 } else if (viewScope === 'solo') {
@@ -123,7 +137,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
         }
 
         fetchData();
-    }, [household.id, user.id, refreshTrigger, viewScope]); // ⚡ Re-fetch when scope changes
+    }, [household.id, user.id, refreshTrigger, viewScope]); // Re-fetch when scope changes
 
 
     // --- PROCESSED CHART DATA ---
@@ -198,8 +212,8 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
         <TooltipProvider>
             <div className={`space-y-4 transition-opacity duration-500 ${usingCachedData ? 'opacity-90' : 'opacity-100'}`}>
 
-                {usingCachedData && (
-                    <div className="flex justify-end px-1">
+                {showOfflineIndicator && (
+                    <div className="flex justify-end px-1 animate-in fade-in slide-in-from-top-2 duration-500">
                         <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full flex items-center gap-1 border border-amber-100">
                             <CloudOff className="w-3 h-3" /> Offline Mode
                         </span>
@@ -218,7 +232,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         </CardHeader>
                         <CardContent className="p-4 pt-1 relative z-10">
                             <div className={`text-2xl font-bold tracking-tight ${isBalanced ? 'text-emerald-600' : (netPositive ? 'text-emerald-700' : 'text-rose-700')}`}>
-                                {/* ⚡ FIX: Show 0 instead of Settled text, handle hidden balances */}
+                                {/* FIX: Show 0 instead of Settled text, handle hidden balances */}
                                 {hideBalances ? '****' : (isBalanced ? `${currencySymbol}0` : (netPositive ? '+' : '-') + currencySymbol + Math.abs(stats.netBalance).toLocaleString())}
                             </div>
                             {!isBalanced && (

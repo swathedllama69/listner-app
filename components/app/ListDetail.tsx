@@ -34,7 +34,6 @@ const getPriorityCardStyle = (p: string) => {
     }
 }
 
-// Helper for Goal Colors (Consistent with HomeOverview)
 const getProgressColor = (percent: number) => {
     if (percent >= 100) return "bg-emerald-500";
     if (percent >= 70) return "bg-emerald-400";
@@ -94,7 +93,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [selectedItemForContrib, setSelectedItemForContrib] = useState<WishlistItem | null>(null)
     const [editingItem, setEditingItem] = useState<WishlistItem | null>(null)
 
-    // Haptic Helper
     const triggerHaptic = async (style: ImpactStyle = ImpactStyle.Light) => {
         if (Capacitor.isNativePlatform()) {
             try {
@@ -114,8 +112,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     useEffect(() => {
         async function getItems() {
             const cacheKey = CACHE_KEYS.WISHLIST(list.id);
-
-            // 1. Try Cache
             const cachedData = loadFromCache<WishlistItem[]>(cacheKey);
             if (cachedData) {
                 setItems(cachedData);
@@ -124,11 +120,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             } else {
                 setIsLoading(true);
             }
-
-            // 2. Fetch Network
             const { data, error } = await supabase.from("wishlist_items").select("*").eq("list_id", list.id).order("created_at", { ascending: false })
-
-            // 3. Update & Save
             if (!error && data) {
                 setItems(data as WishlistItem[]);
                 saveToCache(cacheKey, data);
@@ -139,7 +131,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         getItems()
     }, [list.id])
 
-    // --- SORTING & PAGINATION ---
     const activeItems = useMemo(() => {
         const filtered = items.filter(i => !i.is_complete && (activeTab === "All" ? true : i.category === activeTab));
         const priorityWeight: { [key: string]: number } = { "High": 3, "Medium": 2, "Low": 1 };
@@ -158,7 +149,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const totalSaved = activeItems.reduce((sum, i) => sum + (i.saved_amount || 0), 0);
     const totalProgress = totalTarget > 0 ? (totalSaved / totalTarget) * 100 : 0;
 
-    // --- ACTIONS ---
     const handleRenameList = async () => {
         const { error } = await supabase.from('lists').update({ name: listNameForm }).eq('id', list.id);
         if (!error) {
@@ -167,7 +157,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         }
     }
 
-    // --- FAIL-SAFE ADD ITEM ---
     const handleAddItem = async (e: FormEvent) => {
         e.preventDefault();
         if (!form.name.trim()) return;
@@ -241,7 +230,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         triggerHaptic(ImpactStyle.Light);
         const newSaved = (selectedItemForContrib.saved_amount || 0) + amount;
 
-        // Optimistic Update
         setItems(items.map(i => i.id === selectedItemForContrib.id ? { ...i, saved_amount: newSaved } : i));
         setIsContributionOpen(false);
         setContribForm({ amount: "", note: "" });
@@ -249,7 +237,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         const { error } = await supabase.from('wishlist_items').update({ saved_amount: newSaved }).eq('id', selectedItemForContrib.id);
 
         if (error) {
-            // Revert logic could go here
             alert("Failed to add funds.");
         } else {
             triggerNotificationHaptic(NotificationType.Success);
@@ -258,21 +245,13 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
     const handleUpdateItem = async (updatedItem: Partial<WishlistItem>) => {
         if (!editingItem) return;
-
-        // Optimistic
         setItems(items.map(i => i.id === editingItem.id ? { ...i, ...updatedItem } as WishlistItem : i));
         setEditingItem(null);
-
         const { data, error } = await supabase.from('wishlist_items').update({
             name: updatedItem.name, description: updatedItem.description, category: updatedItem.category, target_amount: updatedItem.target_amount,
             saved_amount: updatedItem.saved_amount,
             quantity: updatedItem.quantity, link: updatedItem.link, priority: updatedItem.priority
         }).eq('id', editingItem.id).select().single();
-
-        if (error) {
-            alert("Update failed");
-            // Should ideally revert here
-        }
     };
 
     const handleTogglePrivacy = async () => {
@@ -288,13 +267,10 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         triggerHaptic(ImpactStyle.Medium);
         if (!deleteConfirm) return;
         if (deleteConfirm.type === 'item' && deleteConfirm.id) {
-            // Optimistic
             const oldItems = [...items];
             setItems(items.filter(item => item.id !== deleteConfirm.id));
-
             const { error } = await supabase.from("wishlist_items").delete().eq("id", deleteConfirm.id);
-            if (error) setItems(oldItems); // Revert
-
+            if (error) setItems(oldItems);
         } else if (deleteConfirm.type === 'list') {
             await supabase.from('lists').delete().eq('id', list.id); window.location.reload();
         }
@@ -303,10 +279,8 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
     const toggleComplete = async (item: WishlistItem) => {
         triggerHaptic(ImpactStyle.Light);
-        // Optimistic
         const newStatus = !item.is_complete;
         setItems(items.map(i => i.id === item.id ? { ...i, is_complete: newStatus } : i));
-
         const { error } = await supabase.from("wishlist_items").update({ is_complete: newStatus }).eq("id", item.id)
         if (error) {
             setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !newStatus } : i));
@@ -336,7 +310,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </DropdownMenu>
             </div>
 
-            {/* Progress Header */}
             <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-y border-slate-100 px-6 py-4 shadow-sm flex flex-col gap-2">
                 <div className="flex justify-between items-end"><span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Progress</span><span className="text-sm font-bold text-purple-700">{Math.round(totalProgress)}%</span></div>
                 <Progress value={totalProgress} className="h-2 bg-purple-50" />
@@ -361,7 +334,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                                             <h3 className={`font-bold text-base truncate ${isHigh ? 'text-rose-800' : 'text-slate-800'}`}>{item.name}</h3>
                                             <span className="text-xs font-bold text-slate-600">{Math.round(progress)}%</span>
                                         </div>
-                                        {/* UPDATED: Color-coded individual progress bar */}
                                         <Progress
                                             value={progress}
                                             className="h-1.5 bg-slate-100"
@@ -378,7 +350,14 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                                         </div>
                                         {item.description && <p className="text-xs text-slate-600 italic mb-3 bg-white p-2 rounded border border-slate-100">{item.description}</p>}
                                         <div className="flex gap-2 mt-2">
-                                            <Button size="sm" variant="outline" className="flex-1 h-9 text-xs bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100" onClick={() => { setSelectedItemForContrib(item); setIsContributionOpen(true) }}><DollarSign className="w-3 h-3 mr-1" /> Add Funds</Button>
+                                            <Button
+                                                size="sm"
+                                                variant="outline"
+                                                className="flex-1 h-9 text-xs bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 font-semibold"
+                                                onClick={() => { setSelectedItemForContrib(item); setIsContributionOpen(true) }}
+                                            >
+                                                <Plus className="w-3 h-3 mr-1" /> Add Savings
+                                            </Button>
                                             {item.link && <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => window.open(item.link!, '_blank')}><LinkIcon className="w-4 h-4 text-blue-500" /></Button>}
                                             {item.user_id === user.id && (
                                                 <DropdownMenu>
@@ -400,7 +379,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </TabsContent>
             </Tabs>
 
-            {/* COMPLETED ITEMS - Now with Edit & Undo */}
             {completedItems.length > 0 && (
                 <Accordion type="single" collapsible className="bg-slate-50 rounded-xl border border-slate-100 px-4 mt-4">
                     <AccordionItem value="completed" className="border-none">
@@ -435,7 +413,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
             <PortalFAB onClick={() => setIsFormOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} />
 
-            {/* DIALOGS */}
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl">
                     <DialogHeader><DialogTitle>New Goal</DialogTitle></DialogHeader>

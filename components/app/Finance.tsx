@@ -24,7 +24,6 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { EXPENSE_CATEGORIES } from "@/lib/constants"
 
 type HouseholdMember = { user_id: string; email: string }
-// Added 'scope' to types
 type Expense = { id: number; name: string; amount: number; category: string; user_id: string; notes: string | null; expense_date: string; scope: 'household' | 'personal' }
 type Credit = { id: number; amount: number; notes: string | null; is_settled: boolean; lender_user_id: string | null; lender_name: string; borrower_user_id: string | null; borrower_name: string; created_at: string; scope: 'household' | 'personal' }
 
@@ -36,7 +35,6 @@ function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: 
     )
 }
 
-// ⚡ UPDATED: Accepts 'viewScope' prop
 export function Finance({ user, household, currencySymbol, hideBalances, refreshTrigger, viewScope }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number, viewScope: 'unified' | 'household' | 'solo' }) {
     const [members, setMembers] = useState<HouseholdMember[]>([])
     const [expenses, setExpenses] = useState<Expense[]>([])
@@ -78,7 +76,6 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
         return () => { supabase.removeChannel(expenseChannel); supabase.removeChannel(creditChannel) }
     }, [household.id, user, refreshTrigger]);
 
-    // ⚡ FILTERING LOGIC
     const getFilteredExpenses = () => {
         if (viewScope === 'unified') return expenses;
         if (viewScope === 'household') return expenses.filter(e => e.scope === 'household');
@@ -122,13 +119,12 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
         downloadCSV([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Debts_${new Date().toISOString().split('T')[0]}.csv`);
     }
 
-    // Net Balance Calculation (Based on Visible Credits)
+    // Net Balance Calculation
     const activeCredits = visibleCredits.filter(c => !c.is_settled);
     let iAmOwed = 0; let iOwe = 0;
     activeCredits.forEach(c => { if (c.lender_user_id === user.id) iAmOwed += c.amount; else if (c.borrower_user_id === user.id) iOwe += c.amount; });
     const netBalance = iAmOwed - iOwe;
     const isPositive = netBalance >= 0;
-    // ⚡ FIX: Display '0' instead of 'Settled' logic check
     const isZero = netBalance === 0;
     const displayBalance = hideBalances ? '****' : (isZero ? '0' : Math.abs(netBalance).toLocaleString());
 
@@ -136,9 +132,9 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
         <TooltipProvider>
             <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
                 {/* COLORFUL HEADER */}
-                <div className="sticky top-0 z-10 bg-gradient-to-r from-indigo-600 to-violet-600 text-white px-6 py-4 flex items-center justify-between shadow-md mb-6">
+                <div className={`sticky top-0 z-10 px-6 py-4 flex items-center justify-between shadow-md mb-6 ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
                     <div className="flex flex-col">
-                        <span className="text-[10px] font-bold text-indigo-200 uppercase tracking-widest">Net Position</span>
+                        <span className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest">Net Position</span>
                         {!isZero && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
                     </div>
                     <div className="text-3xl font-bold tracking-tight">
@@ -149,11 +145,9 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
                 <Tabs defaultValue="summary" className="w-full">
                     <div className="flex items-center justify-between mb-6 px-1">
                         <TabsList className="flex w-full sm:w-auto bg-slate-100/80 p-1 rounded-xl gap-1 overflow-x-auto no-scrollbar">
-                            {[{ id: "summary", label: "Summary", icon: DollarSign }, { id: "expenses", label: "Expenses", icon: History }, { id: "credit", label: "Debts", icon: HandCoins }].map(tab => (
-                                <TabsTrigger key={tab.id} value={tab.id} className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-teal-700 data-[state=active]:text-white data-[state=active]:shadow-md transition-all flex items-center justify-center gap-2 whitespace-nowrap">
-                                    <tab.icon className="w-3.5 h-3.5" /> {tab.label}
-                                </TabsTrigger>
-                            ))}
+                            <TabsTrigger value="summary" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-indigo-600 data-[state=active]:text-white transition-all"><DollarSign className="w-3.5 h-3.5 mr-1" /> Summary</TabsTrigger>
+                            <TabsTrigger value="expenses" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-teal-600 data-[state=active]:text-white transition-all"><History className="w-3.5 h-3.5 mr-1" /> Expenses</TabsTrigger>
+                            <TabsTrigger value="credit" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-rose-600 data-[state=active]:text-white transition-all"><HandCoins className="w-3.5 h-3.5 mr-1" /> Debts</TabsTrigger>
                         </TabsList>
 
                         <DropdownMenu>
@@ -171,14 +165,24 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
                         </DropdownMenu>
                     </div>
 
-                    <TabsContent value="summary" className="animate-in fade-in"><FinanceSummary expenses={visibleExpenses} credits={visibleCredits} user={user} currencySymbol={currencySymbol} hideBalances={hideBalances} /></TabsContent>
+                    <TabsContent value="summary" className="animate-in fade-in">
+                        <FinanceSummary
+                            expenses={visibleExpenses}
+                            credits={visibleCredits}
+                            user={user}
+                            currencySymbol={currencySymbol}
+                            hideBalances={hideBalances}
+                            iAmOwed={iAmOwed}
+                            iOwe={iOwe}
+                        />
+                    </TabsContent>
 
                     <TabsContent value="expenses" className="animate-in fade-in">
                         <ExpensesList
                             user={user} household={household} members={members}
                             expenses={visibleExpenses} setExpenses={setExpenses}
                             currencySymbol={currencySymbol} hideBalances={hideBalances}
-                            viewScope={viewScope} // PASSED
+                            viewScope={viewScope}
                         />
                     </TabsContent>
 
@@ -195,37 +199,71 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     )
 }
 
-function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances }: { expenses: Expense[], credits: Credit[], user: User, currencySymbol: string, hideBalances?: boolean }) {
-    const activeCredits = credits.filter(c => !c.is_settled);
-    const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances, iAmOwed, iOwe }: any) {
+    const totalExpenses = expenses.reduce((sum: number, e: any) => sum + e.amount, 0);
     const now = new Date();
-    const monthExpenses = expenses.filter(e => { const d = new Date(e.expense_date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((sum, e) => sum + e.amount, 0);
-    const recentExpenses = expenses.slice(0, 5);
+    const currentMonthExpenses = expenses.filter((e: any) => { const d = new Date(e.expense_date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((sum: number, e: any) => sum + e.amount, 0);
+
+    // Last Month Spend
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthExpenses = expenses.filter((e: any) => { const d = new Date(e.expense_date); return d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear(); }).reduce((sum: number, e: any) => sum + e.amount, 0);
+
+    // Top Category
+    const categoryTotals: { [key: string]: number } = {};
+    expenses.forEach((e: any) => { categoryTotals[e.category] = (categoryTotals[e.category] || 0) + e.amount });
+    const topCategory = Object.keys(categoryTotals).reduce((a, b) => categoryTotals[a] > categoryTotals[b] ? a : b, "None");
+
     const format = (val: number) => hideBalances ? '****' : val.toLocaleString();
 
     return (
-        <div className="space-y-6 p-2">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <Card className="rounded-2xl border-none shadow-lg bg-gradient-to-br from-slate-500 to-slate-700 text-white">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-[10px] font-bold text-slate-200 uppercase tracking-wider">Lifetime Spend</CardTitle><History className="w-4 h-4 text-slate-300" /></CardHeader>
-                    <CardContent><div className="text-2xl font-bold">{currencySymbol}{format(totalExpenses)}</div></CardContent>
+        <div className="space-y-4 p-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {/* Card 1: Net Position (Green) */}
+                <Card className="rounded-xl border-none shadow-md bg-emerald-600 text-white h-24 flex flex-col justify-center relative overflow-hidden">
+                    <div className="absolute right-2 top-2 opacity-20"><Wallet className="w-8 h-8" /></div>
+                    <CardHeader className="p-4 pb-0"><CardTitle className="text-[10px] font-bold text-emerald-100 uppercase">Net Position</CardTitle></CardHeader>
+                    <CardContent className="p-4 pt-1 text-xl font-bold">{currencySymbol}{format(Math.abs(iAmOwed - iOwe))}</CardContent>
                 </Card>
-                <Card className="rounded-2xl border-none shadow-lg bg-gradient-to-br from-indigo-500 to-violet-600 text-white">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-[10px] font-bold text-indigo-200 uppercase tracking-wider">{now.toLocaleString('default', { month: 'long' })} Spend</CardTitle><Wallet className="w-4 h-4 text-indigo-200" /></CardHeader>
-                    <CardContent><div className="text-2xl font-bold">{currencySymbol}{format(monthExpenses)}</div></CardContent>
+
+                {/* Card 2: Current Month (Indigo) */}
+                <Card className="rounded-xl border-none shadow-md bg-indigo-600 text-white h-24 flex flex-col justify-center relative overflow-hidden">
+                    <div className="absolute right-2 top-2 opacity-20"><History className="w-8 h-8" /></div>
+                    <CardHeader className="p-4 pb-0"><CardTitle className="text-[10px] font-bold text-indigo-100 uppercase">{now.toLocaleString('default', { month: 'short' })} Spend</CardTitle></CardHeader>
+                    <CardContent className="p-4 pt-1">
+                        <div className="text-xl font-bold">{currencySymbol}{format(currentMonthExpenses)}</div>
+                        <p className="text-[9px] text-indigo-200 mt-0.5">Prev: {currencySymbol}{format(lastMonthExpenses)}</p>
+                    </CardContent>
                 </Card>
-                <Card className="rounded-2xl border-none shadow-lg bg-gradient-to-br from-amber-500 to-orange-600 text-white">
-                    <CardHeader className="flex flex-row items-center justify-between pb-2"><CardTitle className="text-[10px] font-bold text-amber-100 uppercase tracking-wider">Unsettled Items</CardTitle><HandCoins className="w-4 h-4 text-amber-100" /></CardHeader>
-                    <CardContent><div className="text-2xl font-bold">{activeCredits.length}</div></CardContent>
+
+                {/* Card 3: Unsettled (Amber) */}
+                <Card className="rounded-xl border-none shadow-md bg-amber-500 text-white h-24 flex flex-col justify-center relative overflow-hidden">
+                    <div className="absolute right-2 top-2 opacity-20"><HandCoins className="w-8 h-8" /></div>
+                    <CardHeader className="p-4 pb-0"><CardTitle className="text-[10px] font-bold text-amber-100 uppercase">Unsettled</CardTitle></CardHeader>
+                    <CardContent className="p-4 pt-1">
+                        <div className="flex flex-col text-[10px] font-medium leading-tight">
+                            <span>You owe: {currencySymbol}{format(iOwe)}</span>
+                            <span>Owed: {currencySymbol}{format(iAmOwed)}</span>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Card 4: Top Category (Cyan) */}
+                <Card className="rounded-xl border-none shadow-md bg-cyan-600 text-white h-24 flex flex-col justify-center relative overflow-hidden">
+                    <div className="absolute right-2 top-2 opacity-20"><Lightbulb className="w-8 h-8" /></div>
+                    <CardHeader className="p-4 pb-0"><CardTitle className="text-[10px] font-bold text-cyan-100 uppercase">Top Spend</CardTitle></CardHeader>
+                    <CardContent className="p-4 pt-1">
+                        <div className="text-lg font-bold truncate">{topCategory}</div>
+                        <div className="text-[10px] text-cyan-200">{currencySymbol}{format(categoryTotals[topCategory] || 0)}</div>
+                    </CardContent>
                 </Card>
             </div>
 
             <Card className="border-none shadow-sm bg-white/50">
                 <CardHeader className="pb-2"><CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-wider">Recent Activity</CardTitle></CardHeader>
                 <CardContent>
-                    {recentExpenses.length === 0 ? <p className="text-slate-400 text-sm italic">No recent activity.</p> : (
+                    {expenses.length === 0 ? <p className="text-slate-400 text-sm italic">No recent activity.</p> : (
                         <ul className="space-y-2">
-                            {recentExpenses.map(e => (
+                            {expenses.slice(0, 5).map((e: any) => (
                                 <li key={e.id} className="flex justify-between items-center py-2 border-b border-slate-100 last:border-0">
                                     <div className="flex items-center gap-3">
                                         <div className="h-8 w-8 rounded-full bg-indigo-50 flex items-center justify-center text-[10px] font-bold text-indigo-600 uppercase border border-indigo-100">{e.category.substring(0, 2)}</div>
@@ -233,7 +271,6 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances 
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <span className="font-bold text-slate-700 text-sm">{currencySymbol}{format(e.amount)}</span>
-                                        {/* ⚡ SCOPE BADGE */}
                                         {e.scope === 'personal' && <UserIcon className="w-3 h-3 text-slate-400" />}
                                         {e.scope === 'household' && <HomeIcon className="w-3 h-3 text-slate-300" />}
                                     </div>
@@ -248,7 +285,6 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances 
 }
 
 function ExpensesList({ user, household, members, expenses, setExpenses, currencySymbol, hideBalances, viewScope }: { user: User, household: Household, members: HouseholdMember[], expenses: Expense[], setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>, currencySymbol: string, hideBalances?: boolean, viewScope: string }) {
-    // ⚡ Set default scope based on the current View (Solo -> Personal, Others -> Household)
     const defaultScope = viewScope === 'solo' ? 'personal' : 'household';
 
     const [form, setForm] = useState({ name: '', price: '', quantity: '1', amount: '', category: EXPENSE_CATEGORIES[0], isReimbursable: false, reimburseAmount: '', notes: '', borrowerId: '', scope: defaultScope });
@@ -261,7 +297,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
     const partners = members.filter(m => m.user_id !== user?.id);
     const hasPartners = partners.length > 0;
 
-    // Update form scope when viewScope changes
     useEffect(() => {
         setForm(prev => ({ ...prev, scope: viewScope === 'solo' ? 'personal' : 'household' }));
     }, [viewScope]);
@@ -285,7 +320,7 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
                 category: form.category,
                 notes: form.notes || null,
                 expense_date: new Date().toISOString(),
-                scope: form.scope // ⚡ SAVE SCOPE
+                scope: form.scope
             }).select().single();
 
             if (expenseError) throw expenseError;
@@ -346,8 +381,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
             <Card className="border-none shadow-sm bg-white p-5 rounded-2xl">
                 <CardTitle className="text-sm font-bold text-slate-600 uppercase tracking-wider mb-4">Add Expense</CardTitle>
                 <form onSubmit={handleExpenseSubmit} className="space-y-4">
-
-                    {/* ⚡ SCOPE SELECTOR */}
                     <div className="flex bg-slate-100 p-1 rounded-lg">
                         <button type="button" onClick={() => setForm({ ...form, scope: 'household' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'household' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>House</button>
                         <button type="button" onClick={() => setForm({ ...form, scope: 'personal' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'personal' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>Personal</button>
@@ -363,7 +396,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
                     <div className="space-y-2"><Label>Notes</Label><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-slate-50 h-10 text-sm" /></div>
                     {formTotal === 0 && <div className="space-y-2"><Label>Total Amount ({currencySymbol})*</Label><Input type="number" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} className="bg-slate-50 h-10 text-sm" /></div>}
 
-                    {/* Only show Split option if scope is Household */}
                     {hasPartners && form.scope === 'household' && (
                         <div className="space-y-3 p-3 border border-slate-200 rounded-xl bg-slate-50/50">
                             <div className="flex items-center space-x-2 mb-2"><Checkbox id="reimburse" checked={form.isReimbursable} onCheckedChange={(c) => setForm(f => ({ ...f, isReimbursable: c as boolean }))} /><Label htmlFor="reimburse" className="text-xs font-bold text-slate-600 cursor-pointer">Split Cost?</Label></div>
@@ -386,7 +418,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className="font-bold text-slate-700 text-sm">{currencySymbol}{hideBalances ? '****' : expense.amount.toLocaleString()}</span>
-                                    {/* ⚡ SCOPE BADGE in Unified View */}
                                     {viewScope === 'unified' && expense.scope === 'personal' && <UserIcon className="w-3 h-3 text-slate-400" />}
                                     {viewScope === 'unified' && expense.scope === 'household' && <HomeIcon className="w-3 h-3 text-slate-300" />}
                                     <Pencil className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-500 transition-colors" />
@@ -408,9 +439,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
         </div>
     );
 }
-
-// ... (EditExpenseForm, CreditsList, EditCreditForm remain as in previous update, ensuring CreditList is filtering 'visibleCredits') ...
-// I will include the CreditsList and EditCreditForm below just to be safe and complete
 
 function EditExpenseForm({ expense, onExpenseUpdated, categories, currencySymbol }: { expense: Expense; onExpenseUpdated: any; categories: string[]; currencySymbol: string; }) {
     const [form, setForm] = useState({ name: expense.name, amount: expense.amount.toString(), category: expense.category, notes: expense.notes || '' });
@@ -441,13 +469,11 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
         let lenderName = isOweMe ? 'Me' : form.personName; let borrowerName = !isOweMe ? 'Me' : form.personName;
 
-        // ⚡ If user manually entered a name, default scope to PERSONAL
         let finalScope = 'household';
         if (partnerId && !form.personName) {
             if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
             else { lenderId = partnerId; lenderName = 'Partner'; }
         } else {
-            // Manual entry = Personal scope by default
             finalScope = 'personal';
         }
 
@@ -459,7 +485,7 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
             lender_name: lenderName,
             borrower_user_id: borrowerId,
             borrower_name: borrowerName,
-            scope: finalScope // Save scope
+            scope: finalScope
         }).select().single();
 
         if (error) { alert(error.message); } else { setCredits([data as Credit, ...credits]); setForm({ amount: '', notes: '', direction: 'owe_me', personName: '', scope: 'household' }); }
@@ -497,6 +523,18 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
 
     return (
         <div className="space-y-6">
+            <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl flex gap-3">
+                <div className="bg-blue-100 p-2 rounded-full h-fit"><Info className="w-4 h-4 text-blue-600" /></div>
+                <div className="text-sm text-slate-600">
+                    <p className="font-bold text-slate-800 mb-1">How Tracking Works</p>
+                    <p className="leading-relaxed text-xs">
+                        You can track debts with anyone.
+                        <br />• <strong>Household Scope:</strong> Select a member to link it to their account.
+                        <br />• <strong>Personal Scope:</strong> Type any name (e.g., "John", "Landlord") to track private IOUs.
+                    </p>
+                </div>
+            </div>
+
             <Card className="rounded-xl shadow-sm bg-white p-4 border border-slate-100">
                 <h3 className="font-semibold text-slate-700 mb-4 border-b pb-2">Active Debts</h3>
                 {activeCredits.length === 0 ? <p className="text-slate-400 text-center py-4 text-sm">All settled up!</p> : activeCredits.map(c => {
@@ -516,7 +554,6 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
                 })}
             </Card>
             <Card className="p-5 bg-slate-50 border-slate-200">
-                <div className="bg-white border border-slate-200 p-2 mb-4 rounded-lg text-xs text-slate-500 flex gap-2 items-start"><Info className="w-4 h-4 shrink-0 mt-0.5" /><div>Track IOU's here. Manual names = Personal.</div></div>
                 <form onSubmit={handleAddCredit} className="space-y-3"><div className="grid grid-cols-2 gap-3"><Button type="button" variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button><Button type="button" variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button></div><div className="grid grid-cols-2 gap-3"><Input type="number" placeholder={`Amount (${currencySymbol})`} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required className="bg-white h-10" /><Input placeholder={partnerId && !isSingleUser ? "Partner (Default)" : "Name (e.g. Bank)"} value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} disabled={!!(partnerId && !isSingleUser)} className="bg-white h-10" /></div><Input placeholder="What for? (e.g. Dinner)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-white h-10" /><Button type="submit" className="w-full bg-slate-900 text-white h-11 font-bold">Log Debt</Button></form></Card>
             {settledCredits.length > 0 && (<Accordion type="single" collapsible className="bg-white rounded-xl border border-slate-100 px-4"><AccordionItem value="settled" className="border-none"><AccordionTrigger className="text-slate-500 hover:no-underline text-sm">Settled History</AccordionTrigger><AccordionContent>{settledCredits.map(c => (<div key={c.id} className="flex justify-between py-2 border-b border-slate-50 last:border-0 text-xs text-slate-400"><span>{c.lender_user_id === user.id ? "Was Owed" : "Did Owe"} {currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()} - {c.notes}</span><Trash2 className="w-3 h-3 cursor-pointer hover:text-rose-500" onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, action: 'delete' })} /></div>))}</AccordionContent></AccordionItem></Accordion>)}
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title={deleteConfirm?.action === 'settle' ? "Settle Debt?" : "Delete Entry?"} description="Confirm action." onConfirm={handleAction} />

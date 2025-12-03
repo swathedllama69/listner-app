@@ -12,14 +12,18 @@ import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Camera, LogOut, Loader2, UserMinus, Shield, AlertTriangle, Home, User as UserIcon, Smartphone, Bell, Moon, Lock, Mail, Key, HelpCircle, Users, Trash2, CloudOff, RefreshCw } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
+import {
+    Camera, LogOut, Loader2, UserMinus, Shield, AlertTriangle, Home,
+    User as UserIcon, Smartphone, Moon, Mail, Key,
+    HelpCircle, Users, CloudOff, RefreshCw, Star, Share2, Lock
+} from "lucide-react"
 import { COUNTRIES, CURRENCIES } from "@/lib/constants"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Capacitor } from "@capacitor/core"
 import { App as CapApp } from "@capacitor/app"
+import { Share } from '@capacitor/share'
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
-// Removed imports causing errors
-// import { clearCache, getCacheSize } from "@/lib/offline"
 
 /* eslint-disable @next/next/no-img-element */
 
@@ -93,6 +97,10 @@ export function SettingsView({ user, household }: { user: User, household: House
     const [alertInfo, setAlertInfo] = useState<{ isOpen: boolean, title: string, desc: string }>({ isOpen: false, title: '', desc: '' });
     const showAlert = (title: string, desc: string) => setAlertInfo({ isOpen: true, title, desc });
 
+    // Feature State
+    const [rating, setRating] = useState(0);
+    const [removeMemberId, setRemoveMemberId] = useState<string | null>(null);
+
     const [name, setName] = useState(user.user_metadata?.full_name || "");
     const [avatarUrl, setAvatarUrl] = useState(user.user_metadata?.avatar_url || "");
     const [hhForm, setHhForm] = useState({
@@ -102,6 +110,7 @@ export function SettingsView({ user, household }: { user: User, household: House
         avatar_url: household.avatar_url || ""
     });
 
+    const joinedDate = new Date(user.created_at || Date.now()).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     const userFileRef = useRef<HTMLInputElement>(null);
     const householdFileRef = useRef<HTMLInputElement>(null);
 
@@ -213,9 +222,6 @@ export function SettingsView({ user, household }: { user: User, household: House
     const triggerVerification = (type: 'leave' | 'delete') => {
         triggerHaptic(ImpactStyle.Medium);
         if (type === 'leave' && amIAdmin && members.length === 1) {
-            // If owner leaves and is alone, warn about deletion
-            // We handle this by switching type to delete in UI logic if needed, but better to just warn.
-            // For simplicity, let's stick to the requested flow:
             setVerifyType('delete');
             setVerifyOpen(true);
             return;
@@ -241,18 +247,21 @@ export function SettingsView({ user, household }: { user: User, household: House
         setLoading(false);
     }
 
-    const handleRemoveMember = async (memberId: string) => {
+    const confirmRemoveMember = async () => {
+        if (!removeMemberId) return;
         triggerHaptic(ImpactStyle.Medium);
-        // We don't have a confirm dialog component in scope here other than the custom one, 
-        // but for this quick action let's assume user knows what they are doing or implement a small check if critical.
-        // Since we removed window.confirm/alert, let's skip double confirm for now or reuse verify dialog (overkill).
-        // A direct removal is acceptable for admin power user, or we could add a "Remove" state.
-        // For now: direct remove.
-        const { error } = await supabase.from('household_members').delete().eq('user_id', memberId).eq('household_id', household.id);
+
+        const { error } = await supabase.from('household_members').delete().eq('user_id', removeMemberId).eq('household_id', household.id);
+
+        setRemoveMemberId(null); // Close dialog first
+
         if (!error) {
-            setMembers(members.filter(m => m.id !== memberId));
+            setMembers(members.filter(m => m.id !== removeMemberId));
             triggerNotificationHaptic(NotificationType.Success);
-        } else showAlert("Error", error.message);
+            showAlert("Removed", "Member has been removed from household.");
+        } else {
+            showAlert("Error", error.message);
+        }
     }
 
     const handleClearCache = () => {
@@ -260,6 +269,37 @@ export function SettingsView({ user, household }: { user: User, household: House
         clearCache();
         setCacheSize("0 KB");
         showAlert("Success", "Offline cache cleared.");
+    }
+
+    const handleRateApp = (stars: number) => {
+        setRating(stars);
+        triggerHaptic(ImpactStyle.Medium);
+        // In a real app, save this to DB
+        showAlert("Thank You!", "Your feedback helps us improve.");
+    }
+
+    const handleShareApp = async () => {
+        triggerHaptic(ImpactStyle.Medium);
+        const url = 'https://listner.site/';
+        const msg = 'Check out ListNer - The best app for household lists and finance tracking!';
+
+        try {
+            if (Capacitor.isNativePlatform()) {
+                await Share.share({
+                    title: 'Share ListNer',
+                    text: msg,
+                    url: url,
+                    dialogTitle: 'Share with friends',
+                });
+            } else if (navigator.share) {
+                await navigator.share({ title: 'ListNer', text: msg, url });
+            } else {
+                await navigator.clipboard.writeText(`${msg} ${url}`);
+                showAlert("Copied", "Link copied to clipboard!");
+            }
+        } catch (error) {
+            console.error("Share failed:", error);
+        }
     }
 
     // Identify Provider
@@ -289,6 +329,8 @@ export function SettingsView({ user, household }: { user: User, household: House
                         <div className="text-center">
                             <h3 className="text-xl font-bold text-slate-900">{name}</h3>
                             <p className="text-sm text-slate-500">{user.email}</p>
+                            {/* Date Joined Badge */}
+                            <Badge variant="secondary" className="mt-2 text-[10px] font-normal bg-slate-100 text-slate-500">Joined {joinedDate}</Badge>
                         </div>
                     </div>
 
@@ -338,8 +380,9 @@ export function SettingsView({ user, household }: { user: User, household: House
                                     <input type="file" ref={householdFileRef} hidden accept="image/*" onChange={handleHouseholdImageUpload} />
                                 </div>
                                 <div>
-                                    <h3 className="font-bold text-slate-800 text-lg">Logo & Branding</h3>
-                                    <p className="text-xs text-slate-500">{amIAdmin ? "Tap icon to upload." : "View only."}</p>
+                                    {/* Renamed Label */}
+                                    <h3 className="font-bold text-slate-800 text-lg">Household Image</h3>
+                                    <p className="text-xs text-slate-500">{amIAdmin ? "Replace default image with your custom photo." : "View only."}</p>
                                 </div>
                             </div>
 
@@ -364,7 +407,8 @@ export function SettingsView({ user, household }: { user: User, household: House
                                     </div>
                                     <div className="flex items-center gap-2">
                                         {m.is_owner ? <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full"><Shield className="w-3 h-3" /> Owner</span> : <span className="text-[10px] text-slate-400 font-medium bg-slate-100 px-2 py-1 rounded-full">Member</span>}
-                                        {amIAdmin && m.id !== user.id && <Button variant="ghost" size="sm" onClick={() => handleRemoveMember(m.id)} className="h-8 w-8 p-0 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-full"><UserMinus className="w-4 h-4" /></Button>}
+                                        {/* Remove Button with State Trigger */}
+                                        {amIAdmin && m.id !== user.id && <Button variant="ghost" size="sm" onClick={() => setRemoveMemberId(m.id)} className="h-8 w-8 p-0 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-full"><UserMinus className="w-4 h-4" /></Button>}
                                     </div>
                                 </div>
                             ))}
@@ -372,7 +416,13 @@ export function SettingsView({ user, household }: { user: User, household: House
                     </Card>
 
                     <Card className="border-rose-100 bg-rose-50/20 shadow-sm rounded-2xl">
-                        <CardHeader><CardTitle className="text-rose-700 flex items-center gap-2 text-sm"><Lock className="w-4 h-4" /> Access & Membership</CardTitle></CardHeader>
+                        <CardHeader>
+                            <CardTitle>
+                                <div className="text-rose-700 flex items-center gap-2 text-sm">
+                                    <Lock className="w-4 h-4" /> Access & Membership
+                                </div>
+                            </CardTitle>
+                        </CardHeader>
                         <CardContent>
                             <div className="flex items-center justify-between">
                                 <div className="space-y-0.5">
@@ -399,6 +449,32 @@ export function SettingsView({ user, household }: { user: User, household: House
                                 <Button variant="outline" size="sm" onClick={handleClearCache}><RefreshCw className="w-3 h-3 mr-2" /> Clear</Button>
                             </div>
                             <Separator />
+
+                            {/* Rate App */}
+                            <div className="flex flex-col items-center py-2 gap-2">
+                                <p className="text-sm font-bold text-slate-700">Rate ListNer</p>
+                                <div className="flex gap-2">
+                                    {[1, 2, 3, 4, 5].map((star) => (
+                                        <Star
+                                            key={star}
+                                            className={`w-8 h-8 cursor-pointer transition-all ${star <= rating ? 'fill-amber-400 text-amber-400 scale-110' : 'text-slate-200 hover:text-amber-200'}`}
+                                            onClick={() => handleRateApp(star)}
+                                        />
+                                    ))}
+                                </div>
+                            </div>
+                            <Separator />
+
+                            {/* Share App */}
+                            <div className="flex items-center justify-between cursor-pointer" onClick={handleShareApp}>
+                                <div className="flex gap-3">
+                                    <div className="p-2 bg-blue-50 rounded-lg"><Share2 className="w-5 h-5 text-blue-600" /></div>
+                                    <div><p className="font-medium text-sm">Share App</p><p className="text-xs text-slate-500">Invite friends to ListNer</p></div>
+                                </div>
+                                <Button variant="ghost" size="sm">Share</Button>
+                            </div>
+                            <Separator />
+
                             {/* Dark Mode (Coming Soon) */}
                             <div className="flex items-center justify-between opacity-60">
                                 <div className="flex gap-3">
@@ -408,6 +484,7 @@ export function SettingsView({ user, household }: { user: User, household: House
                                 <Switch disabled />
                             </div>
                             <Separator />
+
                             {/* Support */}
                             <div className="flex items-center justify-between cursor-pointer" onClick={() => window.open('mailto:aliyuiliyasu15@hotmail.com?subject=ListNer%20Support', '_blank')}>
                                 <div className="flex gap-3">
@@ -417,6 +494,7 @@ export function SettingsView({ user, household }: { user: User, household: House
                                 <Button variant="ghost" size="sm">Email</Button>
                             </div>
                             <Separator />
+
                             {/* Version Info */}
                             <div className="text-center pt-4">
                                 <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">ListNer {appVersion}</p>
@@ -427,6 +505,7 @@ export function SettingsView({ user, household }: { user: User, household: House
                 </TabsContent>
             </Tabs>
 
+            {/* Leave/Delete Verification Dialog */}
             <Dialog open={verifyOpen} onOpenChange={setVerifyOpen}>
                 <DialogContent className="sm:max-w-sm rounded-2xl">
                     <DialogHeader><DialogTitle className="flex items-center gap-2 text-rose-600"><AlertTriangle className="w-5 h-5" /> Confirm Action</DialogTitle><DialogDescription>Type <strong>{verifyType === 'leave' ? 'LEAVE' : household.name}</strong> to confirm.</DialogDescription></DialogHeader>
@@ -435,6 +514,21 @@ export function SettingsView({ user, household }: { user: User, household: House
                 </DialogContent>
             </Dialog>
 
+            {/* Confirmation Dialog for Member Removal */}
+            <Dialog open={!!removeMemberId} onOpenChange={(o) => !o && setRemoveMemberId(null)}>
+                <DialogContent className="sm:max-w-sm rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle>Remove Member?</DialogTitle>
+                        <DialogDescription>Are you sure? They will lose access to all shared lists and finance data. This cannot be undone.</DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="flex gap-2">
+                        <Button variant="outline" onClick={() => setRemoveMemberId(null)}>Cancel</Button>
+                        <Button variant="destructive" onClick={confirmRemoveMember}>Remove</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Generic Alert */}
             <AlertDialog isOpen={alertInfo.isOpen} onOpenChange={(o) => setAlertInfo({ ...alertInfo, isOpen: o })} title={alertInfo.title} description={alertInfo.desc} />
         </div>
     )

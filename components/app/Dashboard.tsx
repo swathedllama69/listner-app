@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, ChevronLeft, Wallet, ArrowLeft, Receipt } from "lucide-react"
+import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SidebarLayout } from "@/components/ui/SidebarLayout"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -61,14 +61,14 @@ function PortalFAB({ onClick, className, icon: Icon }: any) {
     );
 }
 
-// --- ⚡ SUPER CREATE MENU (Replaces ContextualCreateDialog) ---
+// --- ⚡ SUPER CREATE MENU (Context Aware) ---
 function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess, currencySymbol, viewScope }: {
     isOpen: boolean, onOpenChange: (open: boolean) => void, context: string, user: User, household: Household, onSuccess: () => void, currencySymbol: string, viewScope: 'unified' | 'household' | 'solo'
 }) {
     const [loading, setLoading] = useState(false);
     const [mode, setMode] = useState<'menu' | 'expense' | 'shopping' | 'wishlist'>('menu');
 
-    // ⚡ CONTEXT AWARE: Set initial mode based on active tab
+    // Set initial mode based on active tab
     useEffect(() => {
         if (isOpen) {
             if (context === 'finance') setMode('expense');
@@ -84,7 +84,7 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
     const [expForm, setExpForm] = useState({ name: '', amount: '', category: EXPENSE_CATEGORIES[0], scope: defaultScope });
     const [listForm, setListForm] = useState({ name: '', isPrivate: false });
 
-    // Keep form scope in sync if view changes while dialog is open
+    // Keep form scope in sync if view changes
     useEffect(() => {
         setExpForm(prev => ({ ...prev, scope: viewScope === 'solo' ? 'personal' : 'household' }));
     }, [viewScope]);
@@ -145,7 +145,7 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
         </div>
     );
 
-    // Render Forms
+    // Render Forms with Contextual Explainers
     const renderForm = () => {
         if (mode === 'expense') return (
             <form onSubmit={handleExpense} className="space-y-4 pt-1 animate-in slide-in-from-right-8 duration-200">
@@ -164,9 +164,23 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
 
         if (mode === 'shopping' || mode === 'wishlist') return (
             <div className="space-y-4 pt-1 animate-in slide-in-from-right-8 duration-200">
+                {/* ⚡ NEW: Explainers for creation */}
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 mb-2">
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                        {mode === 'wishlist'
+                            ? "Create a new collection for your goals. This list will contain specific items (e.g. Laptop, Furniture) you want to save for."
+                            : "Create a new shopping list for recurring needs or specific events."}
+                    </p>
+                </div>
+
                 <div className="space-y-1">
-                    <Label>{mode === 'shopping' ? 'List Name' : 'Goal Name'}</Label>
-                    <Input placeholder={mode === 'shopping' ? "e.g. Costco Run" : "e.g. New Laptop"} value={listForm.name} onChange={e => setListForm({ ...listForm, name: e.target.value })} className="bg-slate-50 border-slate-200 h-11" />
+                    <Label>{mode === 'shopping' ? 'List Name' : 'Collection Name'}</Label>
+                    <Input
+                        placeholder={mode === 'shopping' ? "e.g. Monthly Groceries, Personal Care" : "e.g. House Redesign, Personal Wishlist"}
+                        value={listForm.name}
+                        onChange={e => setListForm({ ...listForm, name: e.target.value })}
+                        className="bg-slate-50 border-slate-200 h-11"
+                    />
                 </div>
                 <div className="flex items-center space-x-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
                     <Checkbox id="priv-check" checked={listForm.isPrivate} onCheckedChange={(c) => setListForm({ ...listForm, isPrivate: c as boolean })} />
@@ -183,7 +197,6 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
                 <DialogHeader className="mb-4 flex flex-row items-center justify-between space-y-0">
                     <div className="flex items-center gap-3">
                         {mode !== 'menu' && (
-                            // ⚡ BACK BUTTON: Allows returning to the main menu even if context auto-opened a form
                             <Button variant="ghost" size="icon" onClick={() => setMode('menu')} className="h-8 w-8 -ml-2 rounded-full hover:bg-slate-100">
                                 <ArrowLeft className="w-5 h-5 text-slate-500" />
                             </Button>
@@ -201,7 +214,7 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
     )
 }
 
-// --- LIST MANAGER (Unchanged) ---
+// --- LIST MANAGER ---
 function ListManager({ user, household, listType, onListSelected, currencySymbol, refreshTrigger }: { user: User, household: Household, listType: 'wishlist' | 'shopping', onListSelected: (isSelected: boolean) => void, currencySymbol: string, refreshTrigger: number }) {
     const [lists, setLists] = useState<ListWithSummary[]>([])
     const [selectedList, setSelectedList] = useState<List | null>(null)
@@ -248,7 +261,10 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     if (selectedList) {
         return (
             <div className="w-full animate-in slide-in-from-right-4 fade-in duration-300">
-                <Button variant="ghost" onClick={handleBack} className="mb-4 text-slate-500 hover:text-slate-800 pl-0 h-auto gap-1 text-base"><span className="text-lg">←</span> Back to Lists</Button>
+                {/* ⚡ UPDATED: Colorful Back Button */}
+                <Button variant="ghost" onClick={handleBack} className="mb-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm hover:shadow-md transition-all">
+                    <ArrowLeft className="w-4 h-4" /> Back to Lists
+                </Button>
                 {listType === 'wishlist' ? <ListDetail user={user} list={selectedList} currencySymbol={currencySymbol} /> : <ShoppingList user={user} list={selectedList} currencySymbol={currencySymbol} />}
             </div>
         )
@@ -296,7 +312,11 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {lists.map(list => (
                     <div key={list.id} onClick={() => setSelectedList(list)} className="group relative cursor-pointer bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-lg hover:border-indigo-100 transition-all">
-                        <div className="flex justify-between items-start mb-3"><div className={`p-2 rounded-xl ${listType === 'wishlist' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>{listType === 'wishlist' ? <Target className="w-5 h-5" /> : <ShoppingCart className="w-5 h-5" />}</div>{list.is_private && <Lock className="w-4 h-4 text-slate-300" />}</div>
+                        <div className="flex justify-between items-start mb-3">
+                            <div className={`p-2 rounded-xl ${listType === 'wishlist' ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'}`}>{listType === 'wishlist' ? <Target className="w-5 h-5" /> : <ShoppingCart className="w-5 h-5" />}</div>
+                            {/* ⚡ UPDATED: Red Bold Lock */}
+                            {list.is_private && <Lock className="w-4 h-4 text-rose-500 stroke-[3]" />}
+                        </div>
                         <h3 className="font-bold text-slate-800 text-lg mb-1 truncate">{list.name}</h3>
                         <div className="text-sm text-slate-500 font-medium">{listType === 'shopping' ? `${list.pending_items} items • ${currencySymbol}${(list.estimated_cost || 0).toLocaleString()}` : `${list.active_goals} goals • ${currencySymbol}${(list.saved_amount || 0).toLocaleString()} saved`}</div>
 
@@ -339,30 +359,35 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
     // ⚡ NEW: SCOPE STATE
     const [viewScope, setViewScope] = useState<'unified' | 'household' | 'solo'>('unified');
-    const [showScopeExplainer, setShowScopeExplainer] = useState(false);
+    const [dismissedExplainers, setDismissedExplainers] = useState<{ [key: string]: boolean }>({});
 
     const currencySymbol = getCurrencySymbol(household.currency || 'NGN');
 
     useEffect(() => {
-        // 1. Status Bar Fix: Make icons dark so they are visible on white background
+        // 1. Status Bar Fix
         if (Capacitor.isNativePlatform()) {
             StatusBar.setStyle({ style: Style.Light }).catch(() => { });
             StatusBar.setOverlaysWebView({ overlay: false }).catch(() => { });
         }
 
-        // 2. Back Button Support
+        // 2. Back Button Support (Updated)
         if (Capacitor.isNativePlatform()) {
-            CapApp.addListener('backButton', ({ canGoBack }) => {
-                if (isListDetailActive) {
-                    setIsListDetailActive(false); // Close list detail
-                } else if (isFabOpen) {
-                    setIsFabOpen(false); // Close FAB
-                } else if (activeTab !== 'home') {
-                    setActiveTab('home'); // Go to home tab
-                } else {
-                    CapApp.exitApp(); // Exit if on home
-                }
-            });
+            const setupListener = async () => {
+                const { remove } = await CapApp.addListener('backButton', ({ canGoBack }) => {
+                    if (isListDetailActive) {
+                        setIsListDetailActive(false);
+                    } else if (isFabOpen) {
+                        setIsFabOpen(false);
+                    } else if (activeTab !== 'home') {
+                        setActiveTab('home');
+                    } else {
+                        CapApp.exitApp();
+                    }
+                });
+                return remove;
+            };
+            const listenerPromise = setupListener();
+            return () => { listenerPromise.then(remove => remove && remove()); };
         }
 
         // 3. Push Notifications
@@ -383,8 +408,9 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         const savedPrivacy = localStorage.getItem("listner_privacy_mode");
         if (savedPrivacy === "true") setHideBalances(true);
 
-        const hasSeenExplainer = localStorage.getItem("listner_scope_explainer_seen");
-        if (!hasSeenExplainer) setShowScopeExplainer(true);
+        // Load dismissed explainers
+        const savedExplainers = localStorage.getItem(`listner_explainers_${user.id}`);
+        if (savedExplainers) setDismissedExplainers(JSON.parse(savedExplainers));
 
         async function fetchData() {
             const { count } = await supabase.from('household_members').select('*', { count: 'exact', head: true }).eq('household_id', household.id);
@@ -396,14 +422,11 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
     }, [household.id, user, isListDetailActive, isFabOpen, activeTab]);
 
-    const handleScopeChange = (scope: 'unified' | 'household' | 'solo') => {
-        setViewScope(scope);
-    };
-
-    const dismissExplainer = () => {
-        setShowScopeExplainer(false);
-        localStorage.setItem("listner_scope_explainer_seen", "true");
-    };
+    const handleDismissExplainer = (scope: string) => {
+        const newState = { ...dismissedExplainers, [scope]: true };
+        setDismissedExplainers(newState);
+        localStorage.setItem(`listner_explainers_${user.id}`, JSON.stringify(newState));
+    }
 
     const togglePrivacy = () => {
         const newVal = !hideBalances;
@@ -425,7 +448,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         <SidebarLayout user={user} household={household} memberCount={memberCount} activeTab={activeTab} setActiveTab={setActiveTab}>
             <div className="w-full pb-24 relative">
 
-                {/* ⚡ HEADER: Added pt-4 for status bar breathing room */}
+                {/* ⚡ HEADER: Updated for Sync & Toggles */}
                 <div className="pt-4 px-1 mb-6 space-y-4">
                     <div className="flex justify-between items-center">
                         <div>
@@ -437,38 +460,44 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                             <Button variant="ghost" size="icon" onClick={togglePrivacy} className="text-slate-400 hover:bg-slate-100 rounded-full">
                                 {hideBalances ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </Button>
-                            {memberCount < 2 && <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-violet-600 text-white rounded-full text-xs h-8 px-3 font-bold"><UserPlus className="w-3.5 h-3.5 mr-1.5" /> Invite</Button>}
+
+                            {/* ⚡ UPDATED: Sync Button */}
+                            <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-violet-600 text-white rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-violet-700">
+                                <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Sync
+                            </Button>
                         </div>
                     </div>
 
-                    {/* ⚡ NEW: SCOPE TOGGLE */}
+                    {/* ⚡ NEW: SCOPE TOGGLE & EXPLAINER (For Home & Finance) */}
                     {(activeTab === 'home' || activeTab === 'finance') && (
-                        <div className="flex items-center justify-between bg-slate-100 p-1 rounded-xl">
-                            {['unified', 'household', 'solo'].map((scope) => (
-                                <button
-                                    key={scope}
-                                    onClick={() => handleScopeChange(scope as any)}
-                                    className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all capitalize ${viewScope === scope ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                >
-                                    {scope}
-                                </button>
-                            ))}
-                        </div>
-                    )}
-
-                    {/* ⚡ NEW: EXPLAINER (Dismissable) */}
-                    {showScopeExplainer && activeTab === 'finance' && (
-                        <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl flex gap-3 items-start relative animate-in fade-in slide-in-from-top-2">
-                            <Info className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
-                            <div className="flex-1">
-                                <p className="text-xs font-bold text-indigo-800 mb-0.5">New: Finance Modes</p>
-                                <p className="text-[11px] text-indigo-600 leading-tight">
-                                    <strong>Unified:</strong> See everything.<br />
-                                    <strong>Household:</strong> Shared bills visible to partner.<br />
-                                    <strong>Solo:</strong> Your private expenses (hidden from partner).
-                                </p>
+                        <div className="space-y-3">
+                            <div className="flex items-center justify-between bg-slate-100 p-1 rounded-xl">
+                                {['unified', 'household', 'solo'].map((scope) => (
+                                    <button
+                                        key={scope}
+                                        onClick={() => setViewScope(scope as any)}
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all capitalize ${viewScope === scope ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                                    >
+                                        {scope}
+                                    </button>
+                                ))}
                             </div>
-                            <button onClick={dismissExplainer} className="text-indigo-400 hover:text-indigo-600"><X className="w-4 h-4" /></button>
+
+                            {/* Dismissible Explainer */}
+                            {!dismissedExplainers[viewScope] && (
+                                <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl flex gap-3 items-start relative animate-in fade-in slide-in-from-top-2">
+                                    <Info className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
+                                    <div className="flex-1">
+                                        <p className="text-xs font-bold text-indigo-800 mb-0.5 capitalize">{viewScope} Mode</p>
+                                        <p className="text-[11px] text-indigo-600 leading-tight">
+                                            {viewScope === 'unified' && "You are seeing everything. Both shared household items and your private personal items."}
+                                            {viewScope === 'household' && "Filtering for shared items only. These are visible to other household members."}
+                                            {viewScope === 'solo' && "Filtering for your private items only. These are hidden from the household."}
+                                        </p>
+                                    </div>
+                                    <button onClick={() => handleDismissExplainer(viewScope)} className="text-indigo-400 hover:text-indigo-600"><X className="w-4 h-4" /></button>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -481,7 +510,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                             currencySymbol={currencySymbol}
                             hideBalances={hideBalances}
                             refreshTrigger={refreshKey}
-                            viewScope={viewScope} // PASSED
+                            viewScope={viewScope}
                         />
                     </TabsContent>
 
@@ -514,7 +543,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                             currencySymbol={currencySymbol}
                             hideBalances={hideBalances}
                             refreshTrigger={refreshKey}
-                            viewScope={viewScope} // PASSED
+                            viewScope={viewScope}
                         />
                     </TabsContent>
 
@@ -529,7 +558,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
                 {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={handleOnboardingComplete} />}
 
-                {/* ⚡ UPGRADED MENU */}
+                {/* ⚡ UPGRADED MENU with Context */}
                 <CreateMenu
                     isOpen={isFabOpen}
                     onOpenChange={setIsFabOpen}
@@ -538,7 +567,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     household={household}
                     onSuccess={handleGlobalRefresh}
                     currencySymbol={currencySymbol}
-                    viewScope={viewScope} // PASSED
+                    viewScope={viewScope}
                 />
 
                 <HouseholdSyncDialog
