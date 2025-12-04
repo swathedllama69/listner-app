@@ -1,7 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
+    // ⚡ FIX: Added namespace to replace package attribute
     namespace "com.listner.app"
+
+    // FIX: Using equals sign for assignment to comply with new AGP versions
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.listner.app"
@@ -11,19 +14,18 @@ android {
         versionName "2.1.1"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
-            // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
-            // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
     buildTypes {
         release {
             minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // FIX: Use optimize for cleaner build
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 
-    // ⚡ FIX for Android 15 (16KB Page Size) Compatibility
+    // FIX: For Android 15 (16KB Page Size) Compatibility
     packagingOptions {
         jniLibs {
             useLegacyPackaging = true
@@ -31,11 +33,14 @@ android {
     }
 }
 
+// ❌ REMOVED THE OLD REPOSITORIES BLOCK THAT CONTAINED flatDir
+/*
 repositories {
     flatDir{
         dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
     }
 }
+*/
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
@@ -47,7 +52,7 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
-    implementation "com.airbnb.android:lottie:6.7.1"
+    implementation "com.airbnb.android:lottie:6.7.1" // Using fixed version
 
 }
 
@@ -59,5 +64,5 @@ try {
         apply plugin: 'com.google.gms.google-services'
     }
 } catch(Exception ignored) {
-    logger.info("google-services.json not found...")
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
