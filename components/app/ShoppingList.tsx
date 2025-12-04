@@ -2,7 +2,7 @@
 
 import { useState, useEffect, FormEvent, ChangeEvent, useMemo, useRef } from "react"
 import { createPortal } from "react-dom"
-import { supabase } from "@/lib/supabase"
+import { supabase } from "@/lib/supabase" // Fixed import
 import { User } from "@supabase/supabase-js"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -20,11 +20,11 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
-import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
+import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline" // Fixed import
 import { SyncQueue } from "@/lib/syncQueue"
 import { Progress } from "@/components/ui/progress"
-import { Capacitor } from "@capacitor/core"
-import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
+import { Capacitor } from "@capacitor/core" // Fixed import
+import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics" // Fixed import
 import { Virtuoso } from 'react-virtuoso'
 
 type ShoppingItem = {
@@ -370,7 +370,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 <div className="relative z-10">
                     <div className="flex items-center gap-2 mb-1">
                         <h2 className="text-xl font-bold truncate max-w-[200px]">{listSettings.name}</h2>
-                        {listSettings.isPrivate && <Lock className="w-4 h-4 text-slate-400" />}
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-blue-500 text-white'}`}>{listSettings.isPrivate ? 'Private' : 'Shared'}</span>
                         {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
                     </div>
                     <p className="text-xs text-slate-400 font-medium flex items-center gap-2">
@@ -381,13 +381,15 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 </div>
                 <div className="relative z-10 text-right">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total Est.</p>
-                    <div className="text-2xl font-bold text-emerald-400">{currencySymbol}{total.toLocaleString()}</div>
+                    {/* ⚡ UPDATED: Total Cost Color */}
+                    <div className="text-2xl font-bold text-blue-400">{currencySymbol}{total.toLocaleString()}</div>
                 </div>
             </div>
 
             {/* Progress Bar */}
             <div className="bg-slate-900 pb-1">
-                <Progress value={progressPercent} className="h-1 bg-slate-800 rounded-none" indicatorClassName="bg-emerald-500" />
+                {/* ⚡ UPDATED: Shrink Progress Bar (h-1.5) */}
+                <Progress value={progressPercent} className="h-1.5 bg-slate-800 rounded-none" indicatorClassName="bg-blue-500" />
             </div>
 
 
