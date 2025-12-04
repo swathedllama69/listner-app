@@ -2,7 +2,7 @@
 
 import { useState, useEffect, FormEvent, ChangeEvent, useMemo, useRef } from "react"
 import { createPortal } from "react-dom"
-import { supabase } from "@/lib/supabase" // Fixed import
+import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -20,11 +20,11 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
-import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline" // Fixed import
+import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
 import { SyncQueue } from "@/lib/syncQueue"
 import { Progress } from "@/components/ui/progress"
-import { Capacitor } from "@capacitor/core" // Fixed import
-import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics" // Fixed import
+import { Capacitor } from "@capacitor/core"
+import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
 import { Virtuoso } from 'react-virtuoso'
 
 type ShoppingItem = {
@@ -62,7 +62,7 @@ function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boo
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-sm rounded-2xl">
-                <DialogHeader><DialogTitle className="flex items-center gap-2"><Info className="w-5 h-5 text-blue-500" /> {title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
+                <DialogHeader><DialogTitle className="flex items-center gap-2"><Info className="w-5 h-5 text-lime-500" /> {title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
                 <DialogFooter><Button onClick={() => onOpenChange(false)} className="w-full">OK</Button></DialogFooter>
             </DialogContent>
         </Dialog>
@@ -370,7 +370,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 <div className="relative z-10">
                     <div className="flex items-center gap-2 mb-1">
                         <h2 className="text-xl font-bold truncate max-w-[200px]">{listSettings.name}</h2>
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-blue-500 text-white'}`}>{listSettings.isPrivate ? 'Private' : 'Shared'}</span>
+                        {/* ⚡ UPDATED: Changed padlock/badge color */}
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>{listSettings.isPrivate ? 'Private' : 'Shared'}</span>
                         {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
                     </div>
                     <p className="text-xs text-slate-400 font-medium flex items-center gap-2">
@@ -382,14 +383,14 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 <div className="relative z-10 text-right">
                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total Est.</p>
                     {/* ⚡ UPDATED: Total Cost Color */}
-                    <div className="text-2xl font-bold text-blue-400">{currencySymbol}{total.toLocaleString()}</div>
+                    <div className="text-2xl font-bold text-lime-400">{currencySymbol}{total.toLocaleString()}</div>
                 </div>
             </div>
 
             {/* Progress Bar */}
             <div className="bg-slate-900 pb-1">
-                {/* ⚡ UPDATED: Shrink Progress Bar (h-1.5) */}
-                <Progress value={progressPercent} className="h-1.5 bg-slate-800 rounded-none" indicatorClassName="bg-blue-500" />
+                {/* ⚡ UPDATED: Shrink Progress Bar (h-1.5) & Lime Color */}
+                <Progress value={progressPercent} className="h-1.5 bg-slate-800 rounded-none" indicatorClassName="bg-lime-500" />
             </div>
 
 
@@ -455,7 +456,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                                                         <span className="font-semibold text-sm text-slate-900 truncate">{item.name}</span>
                                                         {item.is_pending && <CloudOff className="w-3 h-3 text-amber-500" />}
                                                     </div>
-                                                    {parseInt(item.quantity || '1') > 1 && <span className="text-xs font-bold text-blue-600 bg-blue-50 px-1.5 rounded">x{item.quantity}</span>}
+                                                    {parseInt(item.quantity || '1') > 1 && <span className="text-xs font-bold text-lime-600 bg-lime-50 px-1.5 rounded">x{item.quantity}</span>}
                                                     {item.notes && <span className="text-[10px] text-slate-400 truncate ml-2">{item.notes}</span>}
                                                 </div>
                                             </div>
@@ -516,12 +517,12 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 )}
             </CardContent>
 
-            <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center transition-all hover:scale-105 active:scale-95" icon={Plus} />
+            <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95" icon={Plus} />
 
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl top-[20%] translate-y-0">
                     <DialogHeader><DialogTitle>Add Shopping Item</DialogTitle></DialogHeader>
-                    <div className="bg-blue-50 border border-blue-100 p-3 rounded-lg text-xs text-blue-700 flex gap-2 items-start mb-2"><Lightbulb className="w-4 h-4 shrink-0 mt-0.5" /><div>Add items here. If you enter a price and quantity, the total cost will be calculated automatically.</div></div>
+                    <div className="bg-lime-50 border border-lime-100 p-3 rounded-lg text-xs text-lime-800 flex gap-2 items-start mb-2"><Lightbulb className="w-4 h-4 shrink-0 mt-0.5" /><div>Add items here. If you enter a price and quantity, the total cost will be calculated automatically.</div></div>
                     <form onSubmit={handleAddItem} className="space-y-4">
                         <div className="grid grid-cols-4 gap-3"><div className="col-span-3"><Label>Item Name</Label><Input ref={inputRef} value={form.name} onChange={handleFormChange} name="name" className="h-12 text-lg" autoFocus autoComplete="off" /></div><div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={handleFormChange} name="quantity" className="h-12 text-center" autoComplete="off" /></div></div>
                         <div className="grid grid-cols-2 gap-3"><div><Label>Price ({currencySymbol})</Label><Input type="number" value={form.price} onChange={handleFormChange} name="price" step="0.01" className="h-11" autoComplete="off" /></div>
@@ -532,7 +533,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                         </div>
                         {formPrice > 0 && <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100"><span className="text-xs text-slate-500 font-medium">Item Total</span><span className="text-sm font-bold text-slate-800">{currencySymbol}{formPrice.toLocaleString()} <span className="text-slate-400 text-xs font-normal">x {formQty} =</span> {currencySymbol}{formTotal.toLocaleString()}</span></div>}
                         <div><Label>Notes</Label><Input value={form.notes} onChange={handleFormChange} name="notes" placeholder="Brand, Size, etc." className="h-11" autoComplete="off" /></div>
-                        <Button type="submit" className="w-full h-12 text-base bg-blue-600 hover:bg-blue-700">Add to List</Button>
+                        <Button type="submit" className="w-full h-12 text-base bg-lime-600 hover:bg-lime-700 text-slate-900">Add to List</Button>
                     </form>
                 </DialogContent>
             </Dialog>
@@ -573,7 +574,7 @@ function EditShoppingItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
                     </div>
                 </div>
                 <div><Label>Notes</Label><Input value={form.notes} onChange={handleChange} name="notes" className="h-11" autoComplete="off" /></div>
-                <DialogFooter><Button type="submit" className="w-full h-11 bg-blue-600">Save Changes</Button></DialogFooter>
+                <DialogFooter><Button type="submit" className="w-full h-11 bg-lime-600 hover:bg-lime-700 text-slate-900">Save Changes</Button></DialogFooter>
             </form>
         </DialogContent>
     )

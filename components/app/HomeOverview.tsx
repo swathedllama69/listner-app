@@ -53,17 +53,9 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
     })
     const [allExpenses, setAllExpenses] = useState<any[]>([]); // Raw expenses for flexible charting
 
-    // Offline Indicator Delay
+    // ⚡ CHANGED: Removed delay for Offline Indicator
     useEffect(() => {
-        let timeout: NodeJS.Timeout;
-        if (usingCachedData) {
-            timeout = setTimeout(() => {
-                setShowOfflineIndicator(true);
-            }, 3000);
-        } else {
-            setShowOfflineIndicator(false);
-        }
-        return () => clearTimeout(timeout);
+        setShowOfflineIndicator(usingCachedData);
     }, [usingCachedData]);
 
     useEffect(() => {
@@ -247,7 +239,8 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                     {/* CARD 2: SPENDING */}
                     <Card className="rounded-2xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-indigo-200">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-1 relative z-10">
-                            <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{currentMonthName}</CardTitle>
+                            {/* ⚡ CHANGED: Added "Spend" suffix to title */}
+                            <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{currentMonthName} Spend</CardTitle>
                             <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
                                 <Wallet className="h-3.5 w-3.5" />
                             </div>

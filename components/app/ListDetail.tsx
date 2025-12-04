@@ -2,8 +2,8 @@
 
 import { useState, useEffect, FormEvent, ChangeEvent, useMemo } from "react"
 import { createPortal } from "react-dom"
-// import { supabase } from "@/lib/supabase" 
-// import { User } from "@supabase/supabase-js"
+import { supabase } from "@/lib/supabase"
+import { User } from "@supabase/supabase-js"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -15,80 +15,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
-// import { List, WishlistItem } from "@/lib/types"
+import { List, WishlistItem } from "@/lib/types"
 import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Settings, Globe, Lock, ListChecks, MoreHorizontal, ChevronDown, ChevronUp, CloudOff, Target, Goal, Gem, Plane } from "lucide-react"
-// import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline" 
-// import { SyncQueue } from "@/lib/syncQueue"
-// import { Capacitor } from "@capacitor/core" 
-// import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics" 
-
-// --- INLINE MOCKS & TYPES (To fix build errors) ---
-
-interface User { id: string; }
-interface List { id: string; name: string; household_id: string; is_private: boolean; }
-interface WishlistItem {
-    id: number;
-    name: string;
-    description?: string;
-    category: string;
-    target_amount: number | null;
-    saved_amount: number | null;
-    quantity: number | null;
-    link?: string;
-    priority?: string;
-    is_complete: boolean;
-    created_at: string;
-    user_id: string;
-}
-
-const CACHE_KEYS = { WISHLIST: (id: string) => `wishlist-${id}` };
-const saveToCache = (key: string, data: any) => { };
-const loadFromCache = <T,>(key: string): T | null => null;
-
-const SyncQueue = { add: (data: any) => console.log("Added to offline queue:", data) };
-
-const Capacitor = { isNativePlatform: () => false };
-
-enum ImpactStyle { Light = 'Light', Medium = 'Medium' }
-enum NotificationType { Success = 'Success', Error = 'Error' }
-const Haptics = {
-    impact: async (opts: any) => { },
-    notification: async (opts: any) => { }
-};
-
-// ⚡ FIXED MOCK: Uses standard Promise for await compatibility + Object.assign for chaining
-const supabase = {
-    from: (table: string) => ({
-        select: (cols: string) => ({
-            eq: (col: string, val: any) => ({
-                order: (col2: string, opts: any) => Promise.resolve({ data: [], error: null })
-            })
-        }),
-        insert: (data: any) => ({
-            select: () => ({
-                single: () => Promise.resolve({ data: { ...data, id: Date.now() }, error: null })
-            })
-        }),
-        update: (data: any) => ({
-            eq: (col: string, val: any) => {
-                // Create a standard Promise that resolves to the mock result
-                const promise = Promise.resolve({ data: [data], error: null });
-
-                // Attach the .select() method to the Promise instance to allow chaining
-                return Object.assign(promise, {
-                    select: () => ({
-                        single: () => Promise.resolve({ data: { ...data }, error: null })
-                    })
-                });
-            }
-        }),
-        delete: () => ({
-            eq: (col: string, val: any) => Promise.resolve({ error: null })
-        })
-    })
-};
-
-// --- END MOCKS ---
+import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
+import { SyncQueue } from "@/lib/syncQueue"
+import { Capacitor } from "@capacitor/core"
+import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
 
 const categories = ["Item", "Project", "Vacation", "Other"]
 const priorities = ["High", "Medium", "Low"]
@@ -104,11 +36,12 @@ const getPriorityCardStyle = (p: string) => {
 
 const getProgressColor = (percent: number) => {
     if (percent >= 100) return "bg-emerald-500";
-    if (percent >= 70) return "bg-emerald-400";
-    if (percent >= 30) return "bg-amber-400";
+    if (percent >= 70) return "bg-cyan-500";
+    if (percent >= 30) return "bg-lime-500";
     return "bg-rose-400";
 };
 
+// ⚡ UPDATED: FAB to use "Add Goal" label and Teal color
 function PortalFAB({ onClick, className, icon: Icon, label }: any) {
     const [mounted, setMounted] = useState(false);
     useEffect(() => setMounted(true), []);
@@ -362,7 +295,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 <div>
                     <h2 className="text-2xl font-bold text-slate-800">{list.name}</h2>
                     <div className="flex gap-2 mt-1">
-                        {listSettings.isPrivate ? <span className="flex items-center gap-1 text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-100"><Lock className="w-3 h-3" /> Private</span> : <span className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100"><Globe className="w-3 h-3" /> Shared</span>}
+                        {listSettings.isPrivate ? <span className="flex items-center gap-1 text-xs text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100"><Lock className="w-3 h-3" /> Private</span> : <span className="flex items-center gap-1 text-xs text-cyan-600 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-100"><Globe className="w-3 h-3" /> Shared</span>}
                         {usingCachedData && <span className="flex items-center gap-1 text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"><CloudOff className="w-3 h-3" /> Offline View</span>}
                     </div>
                 </div>
@@ -372,7 +305,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                         <DropdownMenuLabel>List Options</DropdownMenuLabel>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem onClick={() => setIsRenameOpen(true)}><Pencil className="w-4 h-4 mr-2" /> Rename</DropdownMenuItem>
-                        <DropdownMenuItem onClick={handleTogglePrivacy}>{listSettings.isPrivate ? <Globe className="w-4 h-4 mr-2 text-blue-500" /> : <Lock className="w-4 h-4 mr-2 text-amber-500" />} {listSettings.isPrivate ? "Make Public" : "Make Private"}</DropdownMenuItem>
+                        <DropdownMenuItem onClick={handleTogglePrivacy}>{listSettings.isPrivate ? <Globe className="w-4 h-4 mr-2 text-cyan-500" /> : <Lock className="w-4 h-4 mr-2 text-rose-500" />} {listSettings.isPrivate ? "Make Public" : "Make Private"}</DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'list' })}><Trash2 className="w-4 h-4 mr-2" /> Delete List</DropdownMenuItem>
                     </DropdownMenuContent>
@@ -380,9 +313,9 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             </div>
 
             <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-y border-slate-100 px-6 py-4 shadow-sm flex flex-col gap-2">
-                <div className="flex justify-between items-end"><span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Progress</span><span className="text-sm font-bold text-purple-700">{Math.round(totalProgress)}%</span></div>
-                {/* ⚡ UPDATED: Shrink Progress Bar (h-1.5) */}
-                <Progress value={totalProgress} className="h-1.5 bg-purple-50" />
+                <div className="flex justify-between items-end"><span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Progress</span><span className="text-sm font-bold text-cyan-700">{Math.round(totalProgress)}%</span></div>
+                {/* ⚡ UPDATED: Shrink Progress Bar (h-1.5) & Cyan Color */}
+                <Progress value={totalProgress} className="h-1.5 bg-cyan-100" indicatorClassName="bg-cyan-500" />
                 <div className="flex justify-between text-[10px] text-slate-500 font-medium"><span>{currencySymbol}{totalSaved.toLocaleString()} Saved</span><span>Target: {currencySymbol}{totalTarget.toLocaleString()}</span></div>
             </div>
 
@@ -396,7 +329,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                         { label: "Vacation", icon: Plane },
                         { label: "Other", icon: MoreHorizontal }
                     ].map(({ label, icon: Icon }) => (
-                        <TabsTrigger key={label} value={label} className="text-xs flex gap-1 items-center">
+                        <TabsTrigger key={label} value={label} className="text-xs flex gap-1 items-center data-[state=active]:text-cyan-700 data-[state=active]:bg-cyan-50">
                             <Icon className="w-3 h-3" /> {label}
                         </TabsTrigger>
                     ))
@@ -495,7 +428,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             )}
 
             {/* ⚡ FAB Label is now "Add Goal/Item" */}
-            <PortalFAB onClick={() => setIsFormOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-purple-600 hover:bg-purple-700 text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} label="Add Goal/Item" />
+            <PortalFAB onClick={() => setIsFormOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-cyan-600 hover:bg-cyan-700 text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} label="Add Goal/Item" />
 
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl">
@@ -509,7 +442,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                             <div><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
                             <div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div>
                         </div>
-                        <Button type="submit" className="col-span-2 h-11 bg-purple-600 text-base">Create Goal</Button>
+                        <Button type="submit" className="col-span-2 h-11 bg-cyan-600 text-base hover:bg-cyan-700">Create Goal</Button>
                     </form>
                 </DialogContent>
             </Dialog>
