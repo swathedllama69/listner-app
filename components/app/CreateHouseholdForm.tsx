@@ -49,7 +49,6 @@ const compressImage = (file: File): Promise<File> => {
         img.onerror = reject;
     });
 }
-// --------------------------------------------------------------------------------
 
 export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, onHouseholdCreated: (user: User) => void }) {
     const [view, setView] = useState<'choice' | 'create_input' | 'join_input' | 'profile_setup' | 'currency_setup'>('choice');
@@ -58,7 +57,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
     const [currentHouseholdId, setCurrentHouseholdId] = useState<string | null>(null);
 
     const [loading, setLoading] = useState(false)
-    const [name, setName] = useState("")
+    const [name, setName] = useState("") // Household Name
     const [inviteCode, setInviteCode] = useState("")
     const [error, setError] = useState<string | null>(null)
 
@@ -81,6 +80,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
             if (view === 'create_input') {
                 const { data: hh, error: hhError } = await supabase.from('households').insert({
                     name: name,
+                    // Initial currency/country are saved here, but overwritten in Step 3
                     currency: currency,
                     country: country,
                 }).select().single();
@@ -94,7 +94,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 });
                 if (memError) throw memError;
 
-                // ⚡ CAPTURE ID
                 setCurrentHouseholdId(hh.id);
 
             } else {
@@ -119,30 +118,14 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     if (joinError) throw joinError;
                 }
 
-                // ⚡ CAPTURE ID
                 setCurrentHouseholdId(hh.id);
             }
-            // Success -> Move to Profile Setup
+            // Success -> Move to Profile Setup (Step 2)
             setView('profile_setup');
         } catch (err: any) {
             console.error(err);
             setError(err.message || "Something went wrong.");
         } finally { setLoading(false); }
-    };
-
-    // --- STEP 2: PROFILE SETUP LOGIC ---
-    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]; if (!file) return;
-        setUploading(true);
-        try {
-            const compressed = await compressImage(file);
-            const path = `${user.id}/avatar-${Date.now()}.jpg`;
-            const { error: uploadError } = await supabase.storage.from('images').upload(path, compressed);
-            if (uploadError) throw uploadError;
-            const { data } = supabase.storage.from('images').getPublicUrl(path);
-            setAvatarUrl(data.publicUrl);
-        } catch (e: any) { alert("Upload failed: " + e.message); }
-        finally { setUploading(false); }
     };
 
     // --- STEP 3: FINAL SUBMISSION LOGIC (Currency + Final Commit) ---
@@ -157,14 +140,13 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
 
         try {
             // A. Final Profile/Auth Update (Includes setting onboarding_complete: true)
-            const { data: authData, error: authError } = await supabase.auth.updateUser({
+            await supabase.auth.updateUser({
                 data: {
                     full_name: displayName,
                     avatar_url: avatarUrl,
                     onboarding_complete: true
                 }
             });
-            if (authError) throw authError;
 
             // B. Update Profile Table (Necessary for app features)
             const { data: profileData, error: profileError } = await supabase.from('profiles').update({
@@ -172,15 +154,16 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 avatar_url: avatarUrl,
             }).eq('id', user.id).select();
 
-            if (profileError) {
-                // Fallback: If update failed (profile didn't exist), insert it now
+            if (profileError || !profileData || profileData.length === 0) {
+                // Fallback: If update failed (profile didn't exist), INSERT
                 await supabase.from('profiles').insert({ id: user.id, full_name: displayName, avatar_url: avatarUrl, email: user.email, username: user.email?.split('@')[0] });
             }
 
-            // C. Update Household Settings (Country/Currency) - FIX applied here
+            // C. Update Household Settings (Country/Currency)
             await supabase.from('households').update({ country, currency }).eq('id', currentHouseholdId);
 
             // D. Introduce delay and complete onboarding
+            // ⚡ FIX: 500ms pause to ensure DB write propagates before browser reloads.
             await new Promise(resolve => setTimeout(resolve, 500));
             onHouseholdCreated(user);
         } catch (e: any) {
@@ -190,6 +173,20 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
     };
 
     // --- UTILITIES ---
+    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]; if (!file) return;
+        setUploading(true);
+        try {
+            const compressed = await compressImage(file);
+            const path = `${user.id}/avatar-${Date.now()}.jpg`;
+            const { error: uploadError } = await supabase.storage.from('images').upload(path, compressed);
+            if (uploadError) throw uploadError;
+            const { data } = supabase.storage.from('images').getPublicUrl(path);
+            setAvatarUrl(data.publicUrl);
+        } catch (e: any) { alert("Upload failed: " + e.message); }
+        finally { setUploading(false); }
+    };
+
     const handleCountryChange = (c: string) => {
         setCountry(c);
         const match = CURRENCIES.find(curr => c.toUpperCase().includes(curr.name.toUpperCase().split(' ')[1] || 'XYZ'));
@@ -210,7 +207,9 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 setInviteCode(scannedCode);
                 handleHouseholdSubmit(scannedCode); // Auto-submit
             }
-        } catch (e: any) { if (!e.message?.includes('canceled')) alert("Scanner error: " + e.message); }
+        } catch (e: any) {
+            if (!e.message?.includes('canceled')) alert("Scanner error: " + e.message);
+        }
     };
 
     // --- BACKGROUND ---
