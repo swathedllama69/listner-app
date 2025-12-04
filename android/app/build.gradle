@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    // ⚡ FIX: Added namespace to replace package attribute
+    // ⚡ FIX 1: Set namespace to replace the deprecated 'package' attribute in Manifest.
     namespace "com.listner.app"
 
-    // FIX: Using equals sign for assignment to comply with new AGP versions
+    // ⚡ FIX 2: Use equals sign for assignment to comply with new AGP versions (removes 'compileSdk is deprecated' warning)
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.listner.app"
@@ -20,12 +20,12 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-            // FIX: Use optimize for cleaner build
+            // ⚡ FIX 3: Changed to 'proguard-android-optimize.txt' to clear warning
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
 
-    // FIX: For Android 15 (16KB Page Size) Compatibility
+    // ⚡ FIX 4: For Android 15 (16KB Page Size) Compatibility
     packagingOptions {
         jniLibs {
             useLegacyPackaging = true
@@ -33,14 +33,8 @@ android {
     }
 }
 
-// ❌ REMOVED THE OLD REPOSITORIES BLOCK THAT CONTAINED flatDir
-/*
-repositories {
-    flatDir{
-        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
-    }
-}
-*/
+// ❌ The old 'repositories' block (containing flatDir) was REMOVED from here
+// to fix the 'Using flatDir should be avoided' warning.
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
@@ -52,7 +46,7 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
-    implementation "com.airbnb.android:lottie:6.7.1" // Using fixed version
+    implementation "com.airbnb.android:lottie:6.7.1"
 
 }
 
