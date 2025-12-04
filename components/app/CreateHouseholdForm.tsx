@@ -49,21 +49,17 @@ const compressImage = (file: File): Promise<File> => {
 }
 
 export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, onHouseholdCreated: (user: User) => void }) {
-    const [view, setView] = useState<'choice' | 'create_input' | 'join_input' | 'profile'>('choice');
+    // ⚡ FIX: Removed 'profile' view
+    const [view, setView] = useState<'choice' | 'create_input' | 'join_input'>('choice');
 
-    // Step 1 State
+    // Step 1 State (Household Setup)
     const [loading, setLoading] = useState(false)
     const [name, setName] = useState("")
     const [inviteCode, setInviteCode] = useState("")
     const [error, setError] = useState<string | null>(null)
 
-    // Step 2 State (Profile)
-    const [displayName, setDisplayName] = useState(user.user_metadata?.full_name || "");
-    const [avatarUrl, setAvatarUrl] = useState(user.user_metadata?.avatar_url || "");
-    const [uploading, setUploading] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
+    // ⚡ REMOVED: Profile setup state (displayName, avatarUrl, uploading, fileInputRef) are now only in OnboardingWizard
 
-    // --- LOGIC ---
     const handleHouseholdSubmit = async (overrideCode?: string) => {
         const codeToUse = overrideCode || inviteCode;
         setLoading(true); setError(null);
@@ -102,7 +98,9 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     if (joinError) throw joinError;
                 }
             }
-            setView('profile');
+
+            // ⚡ FIX: Call onHouseholdCreated immediately to let app/page.tsx handle the next step (Tutorial -> OnboardingWizard).
+            onHouseholdCreated(user);
         } catch (err: any) {
             console.error(err);
             setError(err.message || "Something went wrong.");
@@ -136,55 +134,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         }
     };
 
-    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]; if (!file) return;
-        setUploading(true);
-        try {
-            const compressed = await compressImage(file);
-            const path = `${user.id}/avatar-${Date.now()}.jpg`;
-            const { error: uploadError } = await supabase.storage.from('images').upload(path, compressed);
-            if (uploadError) throw uploadError;
-            const { data } = supabase.storage.from('images').getPublicUrl(path);
-            setAvatarUrl(data.publicUrl);
-        } catch (e: any) { alert("Upload failed: " + e.message); }
-        finally { setUploading(false); }
-    };
-
-    const handleProfileSubmit = async () => {
-        setLoading(true);
-        try {
-            // Update Auth Metadata 
-            await supabase.auth.updateUser({ data: { full_name: displayName, avatar_url: avatarUrl } });
-
-            // Try Update
-            const { data, error } = await supabase.from('profiles').update({
-                full_name: displayName,
-                avatar_url: avatarUrl,
-            }).eq('id', user.id).select();
-
-            if (error) throw error;
-
-            if (!data || data.length === 0) {
-                // If update failed (profile didn't exist), insert it now
-                await supabase.from('profiles').insert({
-                    id: user.id,
-                    full_name: displayName,
-                    avatar_url: avatarUrl,
-                    email: user.email,
-                    username: user.email?.split('@')[0]
-                });
-            }
-
-            // ⚡ FIX: Introduce a brief pause before triggering the parent transition
-            // This allows the local render cycle to settle and prevents cascading re-renders.
-            await new Promise(resolve => setTimeout(resolve, 100));
-
-            onHouseholdCreated(user);
-        } catch (e: any) {
-            console.error(e);
-            alert("Profile save failed: " + e.message);
-        } finally { setLoading(false); }
-    };
+    // ⚡ REMOVED: handleImageUpload and handleProfileSubmit functions
 
     // --- BACKGROUND ---
     const AnimatedBackground = () => (
@@ -285,6 +235,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                             ) : (
                                 <div className="flex gap-2">
                                     <Input autoFocus placeholder="A1B2C3" value={inviteCode} onChange={e => setInviteCode(e.target.value)} className="h-14 text-xl font-mono tracking-[0.3em] uppercase bg-slate-50 border-slate-200 rounded-2xl text-center focus:ring-2 focus:ring-purple-500 flex-1" maxLength={6} />
+                                    {/* SCAN BUTTON INSIDE JOIN INPUT */}
                                     <Button onClick={handleScan} className="h-14 w-14 rounded-2xl bg-slate-900 text-white hover:bg-slate-800 shadow-md flex-shrink-0" title="Scan QR">
                                         <QrCode className="w-6 h-6" />
                                     </Button>
@@ -303,39 +254,5 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         )
     }
 
-    // 3. PROFILE SETUP 
-    return (
-        <div className="relative flex flex-col items-center justify-center p-6 min-h-screen bg-slate-50 overflow-hidden">
-            <AnimatedBackground />
-            <div className="relative z-10 w-full max-w-sm animate-in zoom-in-95 duration-500">
-                <div className="text-center mb-8">
-                    <h1 className="text-2xl font-bold text-slate-900">One last thing</h1>
-                    <p className="text-slate-500 mt-2 text-sm font-medium">Add a photo so others know it's you.</p>
-                </div>
-
-                <Card className="border-none shadow-2xl bg-white/95 backdrop-blur rounded-[2rem] p-8 space-y-8">
-                    <div className="flex justify-center">
-                        <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-                            <div className="h-32 w-32 rounded-full bg-slate-50 border-4 border-white shadow-xl overflow-hidden flex items-center justify-center transition-all group-hover:scale-105">
-                                {avatarUrl ? <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <UserIcon className="w-12 h-12 text-slate-300" />}
-                                {uploading && <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm"><Loader2 className="w-8 h-8 text-white animate-spin" /></div>}
-                            </div>
-                            <div className="absolute bottom-1 right-1 bg-slate-900 text-white p-2.5 rounded-full border-4 border-white shadow-lg group-hover:bg-indigo-600 transition-colors"><Camera className="w-5 h-5" /></div>
-                        </div>
-                        <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} />
-                    </div>
-
-                    <div className="space-y-4">
-                        <div className="space-y-2 text-center">
-                            <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Display Name</Label>
-                            <Input placeholder="e.g. John" value={displayName} onChange={e => setDisplayName(e.target.value)} className="h-14 bg-slate-50 border-slate-200 text-center text-lg font-bold rounded-2xl focus:bg-white transition-all" />
-                        </div>
-                        <Button onClick={handleProfileSubmit} disabled={loading || !displayName.trim()} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white text-lg font-bold rounded-2xl shadow-xl shadow-slate-200 transition-all active:scale-95">
-                            {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <span className="flex items-center gap-2">All Set <CheckCircle2 className="w-5 h-5" /></span>}
-                        </Button>
-                    </div>
-                </Card>
-            </div>
-        </div>
-    );
+    return null;
 }
