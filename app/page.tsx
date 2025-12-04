@@ -128,7 +128,7 @@ function AuthWrapper() {
       let username = currentUser.email?.split('@')[0] || 'user';
       if (username.length < 3) username = username + '_user';
 
-      // ⚡ FIX: Use .maybeSingle() instead of .single() to prevent 406 Error
+      // ⚡ FIX: Use .maybeSingle() instead of .single() to prevent 406 Errors if profile doesn't exist yet
       let { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
@@ -166,8 +166,10 @@ function AuthWrapper() {
       // Transition Stage
       if (stage !== 'APP') {
         if (currentHousehold) {
+          // If household exists, check if tutorial is seen
           setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
         } else {
+          // If no household, go to setup
           setStage('SETUP_HOUSEHOLD');
         }
       }
@@ -319,7 +321,6 @@ function AuthWrapper() {
 
     // ⚡ TIMEOUT: Increased to 60s
     const timeout = setTimeout(() => {
-      // 🔥 CRITICAL FIX: Use stageRef.current to get real-time state
       if (stageRef.current === 'LOADING') {
         console.warn("⚠️ App stuck on loading. Resetting...");
         setStage('AUTH');
@@ -334,10 +335,14 @@ function AuthWrapper() {
   // Permanent completion (saves to DB)
   const handleTutorialComplete = async () => {
     if (!user) return;
+
+    // 1. Mark tutorial seen locally and to DB
     setUser({ ...user, has_seen_tutorial: true });
     localStorage.setItem(`tutorial_seen_${user.id}`, "true");
-    setStage(household ? 'APP' : 'SETUP_HOUSEHOLD');
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
+
+    // ⚡ FIX: Force hard reload after tutorial to ensure clean transition to Dashboard.
+    window.location.reload();
   };
 
   // Temporary close (shows again next time)
@@ -391,7 +396,7 @@ function AuthWrapper() {
   }
 }
 
-// --- AUTH PAGE ---
+// --- AUTH PAGE (Unchanged for this fix) ---
 function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -502,13 +507,15 @@ function AuthPage() {
         @keyframes slowDrift11 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(15vw, 15vh) rotate(-10deg); } 80% { transform: translate(-5vw, -10vh) rotate(5deg); } }
         @keyframes slowDrift12 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 25% { transform: translate(10vw, -25vh) rotate(5deg); } 75% { transform: translate(-10vw, 15vh) rotate(-15deg); } }
         @keyframes slowDrift13 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(-5vw, 15vh) rotate(-5deg); } }
-        @keyframes slowDrift14 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 65% { transform: translate(10vw, -10vh) rotate(10deg); } }
+        @keyframes slowDrift14 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 65% { transform: translate(30vw, -10vh) rotate(10deg); } }
         @keyframes slowDrift15 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 35% { transform: translate(-15vw, 10vh) rotate(-10deg); } }
       `}</style>
       <div className="absolute inset-0 z-0">
+        {/* ⚡ REPLACED HEAVY BLOBS WITH STATIC GRADIENT FOR PERFORMANCE */}
         <div className="absolute inset-0 bg-gradient-to-br from-teal-50 via-white to-indigo-50 opacity-80"></div>
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] opacity-5"></div>
 
+        {/* ⚡ FLOATING ITEMS PRESERVED */}
         {animationItems.map((item, index) => {
           const sizeInPixels = item.size * (item.isEmoji ? 6 : 4.5);
           const IconComponent = item.Icon;
@@ -521,6 +528,7 @@ function AuthPage() {
       </div>
 
       <div className="relative z-10 w-full flex flex-col lg:flex-row">
+        {/* DESKTOP SIDE PANEL */}
         <div className="hidden lg:flex w-1/2 h-screen flex-col justify-between p-16 text-slate-800 bg-slate-100/50">
           <div className="flex items-center gap-4">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-32 h-32 object-contain" />
@@ -541,6 +549,7 @@ function AuthPage() {
           <div className="text-xs text-slate-400">© 2025 ListNer Inc.</div>
         </div>
 
+        {/* MOBILE / FORM CONTAINER */}
         <div className="w-full lg:w-1/2 h-full flex flex-col items-center justify-center p-6">
           <div className="lg:hidden mb-8 flex flex-col items-center">
             <img src="/logo-icon-lg.png" alt="ListNer App Logo" className="w-16 h-16 mb-4 object-contain" />
