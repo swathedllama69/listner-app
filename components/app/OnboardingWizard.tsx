@@ -74,12 +74,36 @@ export function OnboardingWizard({ user, household, onComplete }: { user: User, 
         if (!name.trim()) return; // Prevent empty name
         setLoading(true);
 
-        // Update Auth Metadata AND Profile Table
-        await supabase.auth.updateUser({ data: { full_name: name, avatar_url: avatarUrl } });
-        await supabase.from('profiles').update({ full_name: name, avatar_url: avatarUrl }).eq('id', user.id);
+        try {
+            // 1. Update Auth Metadata
+            await supabase.auth.updateUser({ data: { full_name: name, avatar_url: avatarUrl } });
 
-        setLoading(false);
-        setStep(2);
+            // 2. Try to UPDATE the existing profile row
+            const { data, error } = await supabase.from('profiles').update({
+                full_name: name,
+                avatar_url: avatarUrl
+            }).eq('id', user.id).select();
+
+            if (error) throw error;
+
+            // 3. Fallback: If UPDATE found 0 rows (meaning profile didn't exist yet), INSERT
+            if (!data || data.length === 0) {
+                await supabase.from('profiles').insert({
+                    id: user.id,
+                    full_name: name,
+                    avatar_url: avatarUrl,
+                    email: user.email,
+                    username: user.email?.split('@')[0]
+                });
+            }
+
+            setLoading(false);
+            setStep(2);
+        } catch (error: any) {
+            console.error("Profile Save Failed:", error);
+            alert("Could not save profile. Please check permissions.");
+            setLoading(false);
+        }
     };
 
     const saveHousehold = async () => {
@@ -90,6 +114,9 @@ export function OnboardingWizard({ user, household, onComplete }: { user: User, 
 
         // Mark Onboarding as Complete
         await supabase.auth.updateUser({ data: { onboarding_complete: true } });
+
+        // ⚡ FIX: Introduce 300ms pause to ensure DB write propagates before browser reloads.
+        await new Promise(resolve => setTimeout(resolve, 300));
 
         setLoading(false);
         onComplete();
