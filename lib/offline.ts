@@ -1,4 +1,4 @@
-// Simple utility for offline caching
+// --- CACHE CONSTANTS & UTILITIES ---
 
 export const CACHE_KEYS = {
     USER_PROFILE: (userId: string) => `offline_user_${userId}`,
@@ -35,3 +35,41 @@ export function loadFromCache<T>(key: string): T | null {
         return null;
     }
 }
+
+// --- SETTINGS VIEW HELPERS ---
+
+export const getCacheSize = (): string => {
+    if (typeof window === 'undefined') return "0 KB";
+    try {
+        let total = 0;
+        for (const x in localStorage) {
+            if (localStorage.hasOwnProperty(x)) {
+                total += (localStorage[x].length + x.length) * 2;
+            }
+        }
+        return (total / 1024).toFixed(2) + " KB";
+    } catch (e) {
+        return "0 KB";
+    }
+};
+
+export const clearCache = async (): Promise<void> => {
+    if (typeof window === 'undefined') return;
+    try {
+        const keysToRemove: string[] = [];
+        for (const key in localStorage) {
+            // Clear both legacy keys and new offline keys
+            if (key.startsWith('listner_') || key.startsWith('offline_')) {
+                keysToRemove.push(key);
+            }
+        }
+        keysToRemove.forEach(key => localStorage.removeItem(key));
+
+        if ('caches' in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map(key => caches.delete(key)));
+        }
+    } catch (e) {
+        console.error("Error clearing cache", e);
+    }
+};

@@ -357,7 +357,8 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
             name: updatedForm.name,
             amount: parseFloat(updatedForm.amount),
             category: updatedForm.category,
-            notes: updatedForm.notes
+            notes: updatedForm.notes,
+            scope: updatedForm.scope
         }).eq('id', editingExpense.id);
 
         if (error) alert(error.message);
@@ -441,10 +442,16 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
 }
 
 function EditExpenseForm({ expense, onExpenseUpdated, categories, currencySymbol }: { expense: Expense; onExpenseUpdated: any; categories: string[]; currencySymbol: string; }) {
-    const [form, setForm] = useState({ name: expense.name, amount: expense.amount.toString(), category: expense.category, notes: expense.notes || '' });
+    const [form, setForm] = useState({ name: expense.name, amount: expense.amount.toString(), category: expense.category, notes: expense.notes || '', scope: expense.scope });
     const handleSubmit = (e: FormEvent) => { e.preventDefault(); onExpenseUpdated(form); };
     return (
-        <form onSubmit={handleSubmit} className="space-y-4"><div className="grid grid-cols-2 gap-4"><div><Label>Amount ({currencySymbol})</Label><Input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></div><div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div></div><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /><DialogFooter><Button type="submit" className='bg-teal-600'>Save Changes</Button></DialogFooter></form>
+        <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="flex bg-slate-100 p-1 rounded-lg">
+                <button type="button" onClick={() => setForm({ ...form, scope: 'household' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'household' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>House</button>
+                <button type="button" onClick={() => setForm({ ...form, scope: 'personal' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'personal' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>Personal</button>
+            </div>
+            <div className="grid grid-cols-2 gap-4"><div><Label>Amount ({currencySymbol})</Label><Input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></div><div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div></div><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /><DialogFooter><Button type="submit" className='bg-teal-600'>Save Changes</Button></DialogFooter>
+        </form>
     );
 }
 
@@ -491,7 +498,7 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         if (error) { alert(error.message); } else { setCredits([data as Credit, ...credits]); setForm({ amount: '', notes: '', direction: 'owe_me', personName: '', scope: 'household' }); }
     }
 
-    const handleUpdateCredit = async (updated: { amount: number, notes: string, direction: string, personName: string }) => {
+    const handleUpdateCredit = async (updated: { amount: number, notes: string, direction: string, personName: string, scope: string }) => {
         if (!editingCredit) return;
         const isOweMe = updated.direction === 'owe_me';
         let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
@@ -508,7 +515,8 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
             lender_user_id: lenderId,
             lender_name: lenderName,
             borrower_user_id: borrowerId,
-            borrower_name: borrowerName
+            borrower_name: borrowerName,
+            scope: updated.scope
         }).eq('id', editingCredit.id).select().single();
 
         if (error) alert(error.message);
@@ -580,13 +588,18 @@ function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, cur
         amount: credit.amount,
         notes: credit.notes || '',
         direction: isOriginallyOwedToMe ? 'owe_me' : 'i_owe',
-        personName: isOriginallyOwedToMe ? credit.borrower_name : credit.lender_name
+        personName: isOriginallyOwedToMe ? credit.borrower_name : credit.lender_name,
+        scope: credit.scope
     });
 
     const isSystemUser = (isOriginallyOwedToMe && credit.borrower_user_id) || (!isOriginallyOwedToMe && credit.lender_user_id);
 
     return (
         <div className="space-y-4 py-2">
+            <div className="flex bg-slate-100 p-1 rounded-lg">
+                <button type="button" onClick={() => setForm({ ...form, scope: 'household' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'household' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>House</button>
+                <button type="button" onClick={() => setForm({ ...form, scope: 'personal' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'personal' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>Personal</button>
+            </div>
             <div className="grid grid-cols-2 gap-3">
                 <Button variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 text-white' : ''} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button>
                 <Button variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 text-white' : ''} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button>

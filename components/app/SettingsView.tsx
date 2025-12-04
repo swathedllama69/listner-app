@@ -24,32 +24,12 @@ import { Capacitor } from "@capacitor/core"
 import { App as CapApp } from "@capacitor/app"
 import { Share } from '@capacitor/share'
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
+// Import offline utils instead of local definition
+import { clearCache, getCacheSize } from "@/lib/offline"
 
 /* eslint-disable @next/next/no-img-element */
 
-// --- LOCAL UTILS FOR CACHE ---
-const clearCache = () => {
-    if (typeof window === 'undefined') return;
-    Object.keys(localStorage).forEach((key) => {
-        if (key.startsWith('listner_cache_')) {
-            localStorage.removeItem(key);
-        }
-    });
-};
-
-const getCacheSize = () => {
-    if (typeof window === 'undefined') return '0 KB';
-    let total = 0;
-    for (const key in localStorage) {
-        if (key.startsWith('listner_cache_')) {
-            const value = localStorage.getItem(key);
-            if (value) total += value.length * 2; // Approximate size in bytes
-        }
-    }
-    return (total / 1024).toFixed(2) + ' KB';
-};
-
-const compressImage = (file: File): Promise<File> => {
+const compressImage = (file: File): Promise<Blob> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.src = URL.createObjectURL(file);
@@ -65,7 +45,7 @@ const compressImage = (file: File): Promise<File> => {
             ctx.drawImage(img, 0, 0, width, height);
             canvas.toBlob((blob) => {
                 if (!blob) { reject(new Error("Compression failed")); return; }
-                resolve(new File([blob], file.name, { type: 'image/jpeg', lastModified: Date.now() }));
+                resolve(blob);
             }, 'image/jpeg', 0.7);
         };
         img.onerror = (error) => reject(error);
@@ -83,7 +63,8 @@ function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boo
     )
 }
 
-export function SettingsView({ user, household }: { user: User, household: Household }) {
+// Updated props to include onSettingsChange and fixed Household type
+export function SettingsView({ user, household, onSettingsChange }: { user: User, household: Household & { invite_code?: string }, onSettingsChange: () => void }) {
     const [loading, setLoading] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [members, setMembers] = useState<any[]>([]);
@@ -123,8 +104,12 @@ export function SettingsView({ user, household }: { user: User, household: House
                 } catch (e) { }
             }
 
-            const size = getCacheSize();
+            const size = await getCacheSize();
             setCacheSize(size);
+
+            // Fetch existing rating
+            const { data: ratingData } = await supabase.from('app_ratings').select('rating').eq('user_id', user.id).single();
+            if (ratingData) setRating(ratingData.rating);
         }
         init();
 
@@ -172,6 +157,7 @@ export function SettingsView({ user, household }: { user: User, household: House
 
             setAvatarUrl(data.publicUrl);
             triggerNotificationHaptic(NotificationType.Success);
+            onSettingsChange(); // Refresh background
             showAlert("Success", "Profile photo updated!");
         } catch (err: any) { showAlert("Error", err.message); } finally { setUploading(false); }
     };
@@ -190,6 +176,7 @@ export function SettingsView({ user, household }: { user: User, household: House
 
             setHhForm(prev => ({ ...prev, avatar_url: data.publicUrl }));
             triggerNotificationHaptic(NotificationType.Success);
+            onSettingsChange(); // Refresh background
             showAlert("Success", "Household icon updated!");
         } catch (err: any) { showAlert("Error", err.message); } finally { setUploading(false); }
     };
@@ -202,6 +189,7 @@ export function SettingsView({ user, household }: { user: User, household: House
         if (error) showAlert("Error", error.message);
         else {
             triggerNotificationHaptic(NotificationType.Success);
+            onSettingsChange(); // Refresh background
             showAlert("Updated", "Profile name updated.");
         }
     }
@@ -215,7 +203,18 @@ export function SettingsView({ user, household }: { user: User, household: House
         if (error) showAlert("Error", error.message);
         else {
             triggerNotificationHaptic(NotificationType.Success);
+            onSettingsChange(); // Refresh background
             showAlert("Updated", "Household details updated.");
+        }
+    }
+
+    const handleCopyInvite = async () => {
+        const inviteLink = `https://listner.app/join/${household.invite_code}`;
+        if (Capacitor.isNativePlatform()) {
+            await Share.share({ title: 'Join my Household on ListNer', text: `Join my household using this code: ${household.invite_code} or click: `, url: inviteLink });
+        } else {
+            await navigator.clipboard.writeText(inviteLink);
+            showAlert("Copied", "Invite link copied to clipboard.");
         }
     }
 
@@ -264,18 +263,23 @@ export function SettingsView({ user, household }: { user: User, household: House
         }
     }
 
-    const handleClearCache = () => {
+    const handleClearCache = async () => {
         triggerHaptic(ImpactStyle.Medium);
-        clearCache();
+        await clearCache();
         setCacheSize("0 KB");
         showAlert("Success", "Offline cache cleared.");
     }
 
-    const handleRateApp = (stars: number) => {
+    const handleRateApp = async (stars: number) => {
         setRating(stars);
         triggerHaptic(ImpactStyle.Medium);
-        // In a real app, save this to DB
-        showAlert("Thank You!", "Your feedback helps us improve.");
+        const { error } = await supabase.from('app_ratings').upsert({
+            user_id: user.id,
+            rating: stars,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'user_id' });
+
+        if (!error) showAlert("Thank You!", "Your rating has been saved.");
     }
 
     const handleShareApp = async () => {
@@ -397,7 +401,10 @@ export function SettingsView({ user, household }: { user: User, household: House
                     </Card>
 
                     <Card className="border-none shadow-sm rounded-2xl">
-                        <CardHeader><CardTitle className="flex items-center gap-2"><Users className="w-5 h-5 text-slate-500" /> Members</CardTitle></CardHeader>
+                        <CardHeader className="flex flex-row items-center justify-between pb-2">
+                            <CardTitle className="flex items-center gap-2"><Users className="w-5 h-5 text-slate-500" /> Members</CardTitle>
+                            {amIAdmin && <Button size="sm" variant="outline" onClick={handleCopyInvite} className="gap-2 h-8 rounded-lg text-xs"><Share2 className="w-3 h-3" /> Invite</Button>}
+                        </CardHeader>
                         <CardContent className="space-y-3">
                             {members.map(m => (
                                 <div key={m.id} className="flex items-center justify-between p-3 border rounded-xl bg-white hover:bg-slate-50 transition-colors">

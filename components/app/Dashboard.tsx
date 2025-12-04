@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, FormEvent } from "react"
+import { useState, useEffect, FormEvent, useRef } from "react"
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt } from "lucide-react"
+import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt, Loader2, ArrowDown } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { SidebarLayout } from "@/components/ui/SidebarLayout"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -58,6 +58,49 @@ function PortalFAB({ onClick, className, icon: Icon }: any) {
             </Button>
         </div>,
         document.body
+    );
+}
+
+// ⚡ NEW: PullToRefresh Component
+function PullToRefresh({ onRefresh, children }: { onRefresh: () => Promise<void>, children: React.ReactNode }) {
+    const [startY, setStartY] = useState(0);
+    const [pullDistance, setPullDistance] = useState(0);
+    const [refreshing, setRefreshing] = useState(false);
+    const threshold = 80;
+
+    const handleTouchStart = (e: React.TouchEvent) => {
+        if (window.scrollY === 0) setStartY(e.touches[0].clientY);
+    };
+
+    const handleTouchMove = (e: React.TouchEvent) => {
+        if (startY > 0 && window.scrollY === 0) {
+            const currentY = e.touches[0].clientY;
+            const dist = Math.max(0, currentY - startY);
+            // Resistance effect
+            setPullDistance(dist > threshold ? threshold + (dist - threshold) * 0.3 : dist);
+        }
+    };
+
+    const handleTouchEnd = async () => {
+        if (pullDistance >= threshold) {
+            setRefreshing(true);
+            setPullDistance(threshold); // Lock at threshold while refreshing
+            await onRefresh();
+            setRefreshing(false);
+        }
+        setStartY(0);
+        setPullDistance(0);
+    };
+
+    return (
+        <div onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+            <div style={{ height: pullDistance, transition: refreshing ? 'height 0.2s' : 'none' }} className="w-full overflow-hidden flex items-center justify-center bg-slate-50">
+                <div className={`transition-transform ${pullDistance > threshold / 2 ? 'rotate-180' : ''}`}>
+                    {refreshing ? <Loader2 className="w-6 h-6 animate-spin text-indigo-600" /> : <ArrowDown className="w-6 h-6 text-slate-400" />}
+                </div>
+            </div>
+            {children}
+        </div>
     );
 }
 
@@ -220,6 +263,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     const [selectedList, setSelectedList] = useState<List | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: string } | null>(null)
+    const [showExplainer, setShowExplainer] = useState(false); // ⚡ State for explainer dialog
 
     useEffect(() => { onListSelected(!!selectedList) }, [selectedList, onListSelected])
 
@@ -245,6 +289,14 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     useEffect(() => { fetchLists() }, [household.id, listType, refreshTrigger]);
 
+    // ⚡ Auto-Show Explainer if empty
+    useEffect(() => {
+        if (!isLoading && lists.length === 0) {
+            const timer = setTimeout(() => setShowExplainer(true), 2000); // 2s delay as requested
+            return () => clearTimeout(timer);
+        }
+    }, [isLoading, lists.length]);
+
     const handleUpdateList = (updated: List) => setLists(lists.map(l => l.id === updated.id ? { ...l, ...updated } : l));
     const handleDeleteList = async () => {
         if (!deleteConfirm) return;
@@ -257,6 +309,29 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
         setSelectedList(null);
         fetchLists();
     }
+
+    // Explainer Content
+    const explainerContent = listType === 'shopping' ? {
+        title: "Mastering Shopping Lists",
+        icon: <ShoppingCart className="w-12 h-12 text-blue-500" />,
+        text: (
+            <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
+                <p><strong>1. Create Collections:</strong> Instead of one giant list, create specific lists like <em>"Monthly Groceries"</em>, <em>"Party Supplies"</em>, or <em>"Hardware Store"</em>.</p>
+                <p><strong>2. Add Items:</strong> Open a list to add items. You can set quantities and priorities.</p>
+                <p><strong>3. Collaborate:</strong> By default, lists are shared with your household. Toggle <strong>Private</strong> inside the list settings if it's just for you.</p>
+            </div>
+        )
+    } : {
+        title: "Using Wishlists",
+        icon: <Target className="w-12 h-12 text-purple-500" />,
+        text: (
+            <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
+                <p><strong>1. Set Goals:</strong> Create a collection for things you want to save for, like <em>"New Laptop"</em> or <em>"Vacation Fund"</em>.</p>
+                <p><strong>2. Track Progress:</strong> Add specific items with prices. Mark contributions as you save money towards them.</p>
+                <p><strong>3. Shared or Solo:</strong> Planning a surprise? Make the list <strong>Private</strong>. Saving for a couch? Keep it <strong>Shared</strong>.</p>
+            </div>
+        )
+    };
 
     if (selectedList) {
         return (
@@ -279,6 +354,16 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     return (
         <div className="space-y-6">
+            {/* ⚡ Info Button Header */}
+            <div className="flex justify-between items-center -mb-2">
+                <div></div> {/* Spacer */}
+                {lists.length > 0 && (
+                    <Button variant="ghost" size="sm" onClick={() => setShowExplainer(true)} className="text-slate-400 hover:text-indigo-600 h-6 px-2 text-[10px] uppercase font-bold gap-1">
+                        <Info className="w-3 h-3" /> How it works
+                    </Button>
+                )}
+            </div>
+
             {listType === 'shopping' ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <Card className="rounded-2xl shadow-sm border border-slate-100 p-4"><CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Items Pending</CardTitle><div className="text-2xl font-bold text-slate-800">{grandTotalItems.toLocaleString()}</div></Card>
@@ -331,6 +416,20 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
             </div>
 
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete List?" description="This action cannot be undone." onConfirm={handleDeleteList} />
+
+            {/* ⚡ Explainer Dialog */}
+            <Dialog open={showExplainer} onOpenChange={setShowExplainer}>
+                <DialogContent className="sm:max-w-sm rounded-2xl text-center">
+                    <DialogHeader className="flex flex-col items-center">
+                        <div className="bg-slate-50 p-4 rounded-full mb-4">{explainerContent.icon}</div>
+                        <DialogTitle className="text-xl font-bold text-slate-800">{explainerContent.title}</DialogTitle>
+                    </DialogHeader>
+                    <div className="text-left bg-slate-50/50 p-4 rounded-xl border border-slate-100">
+                        {explainerContent.text}
+                    </div>
+                    <Button onClick={() => setShowExplainer(false)} className="w-full mt-2 bg-slate-900 rounded-xl">Got it!</Button>
+                </DialogContent>
+            </Dialog>
         </div>
     )
 }
@@ -434,7 +533,10 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         localStorage.setItem("listner_privacy_mode", String(newVal));
     }
 
-    const handleGlobalRefresh = () => setRefreshKey(prev => prev + 1);
+    const handleGlobalRefresh = async () => {
+        setRefreshKey(prev => prev + 1);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Delay for effect
+    };
     const handleOnboardingComplete = () => {
         localStorage.setItem(`tutorial_seen_${user.id}`, "true");
         setShowOnboarding(false);
@@ -489,7 +591,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                                     <Info className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
                                     <div className="flex-1">
                                         <p className="text-xs font-bold text-indigo-800 mb-0.5 capitalize">{viewScope} Mode</p>
-                                        <p className="text-[11px] text-indigo-600 leading-tight">
+                                        <p className="text-xs text-indigo-600 leading-tight">
                                             {viewScope === 'unified' && "You are seeing everything. Both shared household items and your private personal items."}
                                             {viewScope === 'household' && "Filtering for shared items only. These are visible to other household members."}
                                             {viewScope === 'solo' && "Filtering for your private items only. These are hidden from the household."}
@@ -502,55 +604,57 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     )}
                 </div>
 
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                    <TabsContent value="home" className="animate-in fade-in duration-300">
-                        <HomeOverview
-                            user={user}
-                            household={household}
-                            currencySymbol={currencySymbol}
-                            hideBalances={hideBalances}
-                            refreshTrigger={refreshKey}
-                            viewScope={viewScope}
-                        />
-                    </TabsContent>
+                <PullToRefresh onRefresh={handleGlobalRefresh}>
+                    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                        <TabsContent value="home" className="animate-in fade-in duration-300">
+                            <HomeOverview
+                                user={user}
+                                household={household}
+                                currencySymbol={currencySymbol}
+                                hideBalances={hideBalances}
+                                refreshTrigger={refreshKey}
+                                viewScope={viewScope}
+                            />
+                        </TabsContent>
 
-                    <TabsContent value="wishlist" className="animate-in fade-in duration-300">
-                        <ListManager
-                            user={user}
-                            household={household}
-                            listType="wishlist"
-                            onListSelected={setIsListDetailActive}
-                            currencySymbol={currencySymbol}
-                            refreshTrigger={refreshKey}
-                        />
-                    </TabsContent>
+                        <TabsContent value="wishlist" className="animate-in fade-in duration-300">
+                            <ListManager
+                                user={user}
+                                household={household}
+                                listType="wishlist"
+                                onListSelected={setIsListDetailActive}
+                                currencySymbol={currencySymbol}
+                                refreshTrigger={refreshKey}
+                            />
+                        </TabsContent>
 
-                    <TabsContent value="shopping" className="animate-in fade-in duration-300">
-                        <ListManager
-                            user={user}
-                            household={household}
-                            listType="shopping"
-                            onListSelected={setIsListDetailActive}
-                            currencySymbol={currencySymbol}
-                            refreshTrigger={refreshKey}
-                        />
-                    </TabsContent>
+                        <TabsContent value="shopping" className="animate-in fade-in duration-300">
+                            <ListManager
+                                user={user}
+                                household={household}
+                                listType="shopping"
+                                onListSelected={setIsListDetailActive}
+                                currencySymbol={currencySymbol}
+                                refreshTrigger={refreshKey}
+                            />
+                        </TabsContent>
 
-                    <TabsContent value="finance" className="animate-in fade-in duration-300">
-                        <Finance
-                            user={user}
-                            household={household}
-                            currencySymbol={currencySymbol}
-                            hideBalances={hideBalances}
-                            refreshTrigger={refreshKey}
-                            viewScope={viewScope}
-                        />
-                    </TabsContent>
+                        <TabsContent value="finance" className="animate-in fade-in duration-300">
+                            <Finance
+                                user={user}
+                                household={household}
+                                currencySymbol={currencySymbol}
+                                hideBalances={hideBalances}
+                                refreshTrigger={refreshKey}
+                                viewScope={viewScope}
+                            />
+                        </TabsContent>
 
-                    <TabsContent value="settings" className="animate-in fade-in duration-300">
-                        <SettingsView user={user} household={household} />
-                    </TabsContent>
-                </Tabs>
+                        <TabsContent value="settings" className="animate-in fade-in duration-300">
+                            <SettingsView user={user} household={household} onSettingsChange={handleGlobalRefresh} />
+                        </TabsContent>
+                    </Tabs>
+                </PullToRefresh>
 
                 {!isListDetailActive && activeTab !== 'settings' && (
                     <PortalFAB onClick={() => setIsFabOpen(true)} className={`h-16 w-16 rounded-full shadow-2xl bg-lime-400 hover:bg-lime-500 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95 hover:rotate-90 duration-300`} icon={Plus} />
