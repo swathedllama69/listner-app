@@ -153,9 +153,10 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
     const handleProfileSubmit = async () => {
         setLoading(true);
         try {
+            // Update Auth Metadata 
             await supabase.auth.updateUser({ data: { full_name: displayName, avatar_url: avatarUrl } });
 
-            // ⚡ FIX: Fallback Logic. Try Update, if 0 rows, try Insert.
+            // Try Update
             const { data, error } = await supabase.from('profiles').update({
                 full_name: displayName,
                 avatar_url: avatarUrl,
@@ -164,7 +165,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
             if (error) throw error;
 
             if (!data || data.length === 0) {
-                // Profile didn't exist (e.g. page.tsx failed), so we insert it now
+                // If update failed (profile didn't exist), insert it now
                 await supabase.from('profiles').insert({
                     id: user.id,
                     full_name: displayName,
@@ -173,6 +174,10 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     username: user.email?.split('@')[0]
                 });
             }
+
+            // ⚡ FIX: Introduce a brief pause before triggering the parent transition
+            // This allows the local render cycle to settle and prevents cascading re-renders.
+            await new Promise(resolve => setTimeout(resolve, 100));
 
             onHouseholdCreated(user);
         } catch (e: any) {
@@ -280,7 +285,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                             ) : (
                                 <div className="flex gap-2">
                                     <Input autoFocus placeholder="A1B2C3" value={inviteCode} onChange={e => setInviteCode(e.target.value)} className="h-14 text-xl font-mono tracking-[0.3em] uppercase bg-slate-50 border-slate-200 rounded-2xl text-center focus:ring-2 focus:ring-purple-500 flex-1" maxLength={6} />
-                                    {/* SCAN BUTTON INSIDE JOIN INPUT */}
                                     <Button onClick={handleScan} className="h-14 w-14 rounded-2xl bg-slate-900 text-white hover:bg-slate-800 shadow-md flex-shrink-0" title="Scan QR">
                                         <QrCode className="w-6 h-6" />
                                     </Button>
@@ -299,7 +303,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         )
     }
 
-    // 3. PROFILE SETUP (Unchanged from previous robust version)
+    // 3. PROFILE SETUP 
     return (
         <div className="relative flex flex-col items-center justify-center p-6 min-h-screen bg-slate-50 overflow-hidden">
             <AnimatedBackground />
