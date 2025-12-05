@@ -15,14 +15,16 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Dialog, DialogContent, DialogHeader, DialogTrigger, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, ArrowLeft, Receipt, Loader2, ArrowDown, Goal, ArrowDownRight, User as UserIcon } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
+// ⚡ FIX: Added Pencil to the import list
+import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt, Loader2, ArrowDown, ListChecks, CheckCircle2, Goal, TrendingUp, ArrowDownRight, User as UserIcon } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 
-// Child Components
+// ⚡ REAL IMPORTS (Using your existing files)
+import { SidebarLayout } from "@/components/ui/SidebarLayout" // Fixed: No longer conflicts
 import { ListDetail } from "@/components/app/ListDetail"
 import { ShoppingList } from "@/components/app/ShoppingList"
 import { Finance } from "@/components/app/Finance"
@@ -46,26 +48,9 @@ type ListSummary = {
     total_goals?: number; completed_goals?: number;
 };
 
-// --- MOCK SidebarLayout ---
-const SidebarLayout = ({ children, activeTab, setActiveTab }: { children: React.ReactNode, activeTab: string, setActiveTab: (t: string) => void, [key: string]: any }) => (
-    <div className="flex flex-col h-screen bg-slate-50 font-sans">
-        <div className="flex-1 overflow-y-auto overflow-x-hidden pb-20">{children}</div>
-        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-2 flex justify-around z-50">
-            {['home', 'wishlist', 'shopping', 'finance'].map((tab: string) => (
-                <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`p-2 rounded-lg capitalize text-xs font-bold flex flex-col items-center gap-1 transition-colors ${activeTab === tab ? 'text-emerald-600 bg-emerald-50' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                    <span className="w-2 h-2 rounded-full bg-current opacity-50"></span>
-                    {tab}
-                </button>
-            ))}
-        </div>
-    </div>
-);
 
 // --- HELPER COMPONENTS ---
+
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -211,13 +196,13 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
             const isWishlist = mode === 'wishlist';
             return (
                 <div className="space-y-4 pt-1 animate-in slide-in-from-right-8 duration-200">
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-100 mb-2">
-                        <p className="text-xs text-slate-500 leading-relaxed">{isWishlist ? "Create a new Wishlist Collection to track savings and targets." : "Create a new Shopping List for your household's active purchases."}</p>
+                    <div className={`p-3 rounded-xl border mb-2 ${isWishlist ? 'bg-emerald-50 border-emerald-100' : 'bg-lime-50 border-lime-100'}`}>
+                        <p className={`text-xs leading-relaxed ${isWishlist ? 'text-emerald-800' : 'text-lime-800'}`}>{isWishlist ? "Create a new Wishlist Collection to track savings and targets." : "Create a new Shopping List for your household's active purchases."}</p>
                     </div>
                     <div className="space-y-1"><Label>{mode === 'shopping' ? 'Shopping List Name' : 'Wishlist Name'}</Label><Input placeholder={mode === 'shopping' ? "e.g. Monthly Groceries" : "e.g. Vacation Fund"} value={listForm.name} onChange={e => setListForm({ ...listForm, name: e.target.value })} className="bg-slate-50 border-slate-200 h-11" /></div>
                     <div className="flex items-center space-x-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
                         <Checkbox id="priv-check" checked={listForm.isPrivate} onCheckedChange={(c) => setListForm({ ...listForm, isPrivate: c as boolean })} />
-                        <Label htmlFor="priv-check" className="text-sm font-medium text-slate-600">{listForm.isPrivate ? <span className="text-rose-600 font-bold">Private Wishlist (Private)</span> : <span className="text-blue-600 font-bold">Household Wishlist (Shared)</span>}</Label>
+                        <Label htmlFor="priv-check" className="text-sm font-medium text-slate-600">{listForm.isPrivate ? <span className="text-rose-600 font-bold">Private Wishlist (Private)</span> : <span className="text-emerald-600 font-bold">Household Wishlist (Shared)</span>}</Label>
                     </div>
                     <Button onClick={() => handleList()} className={`w-full h-12 text-base font-medium ${mode === 'shopping' ? 'bg-lime-600 hover:bg-lime-700 text-slate-900' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`} disabled={loading || !listForm.name}>{loading ? 'Creating...' : `Create ${mode === 'shopping' ? 'List' : 'Wishlist'}`}</Button>
                 </div>
@@ -246,12 +231,12 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     const [selectedList, setSelectedList] = useState<List | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: string } | null>(null)
-    const [showExplainer, setShowExplainer] = useState(false);
+    const [showExplainer, setShowExplainer] = useState(false); // Manually triggered explainer dialog
 
     useEffect(() => { onListSelected(!!selectedList) }, [selectedList, onListSelected])
 
     const fetchLists = async () => {
-        setIsLoading(true)
+        setIsLoading(true);
         try {
             // Parallel Fetching for speed
             const [listsResult, summariesResult] = await Promise.all([
@@ -314,22 +299,22 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     const explainerContent = listType === 'shopping' ? {
         title: "Mastering Shopping Lists",
-        icon: <ShoppingCart className="w-12 h-12 text-blue-500" />,
+        icon: <ShoppingCart className="w-12 h-12 text-lime-600" />,
         text: (
             <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
                 <p><strong>1. Create Collections:</strong> Create lists like <em>"Monthly Groceries"</em> or <em>"Party Supplies"</em>.</p>
-                <p><strong>2. Add Items:</strong> Open a list to add items. You can set quantities and priorities.</p>
+                <p><strong>2. Add Items:</strong> Open a list to add items, quantities and priorities.</p>
                 <p><strong>3. Collaborate:</strong> By default, lists are shared with your household. Toggle <strong>Private</strong> inside the list settings if it's just for you.</p>
             </div>
         )
     } : {
-        title: "Using Wishlists",
-        icon: <Target className="w-12 h-12 text-lime-600" />,
+        title: "Your Wishlists",
+        icon: <Target className="w-12 h-12 text-emerald-600" />,
         text: (
             <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
-                <p><strong>1. Set Goals:</strong> Create a collection for things you want to save for, like <em>"New Laptop"</em> or <em>"Vacation Fund"</em>.</p>
-                <p><strong>2. Track Progress:</strong> Add specific items/goals with prices. Mark contributions as you save money towards them.</p>
-                <p><strong>3. Shared or Solo:</strong> Planning a surprise? Make the wishlist <strong>Private</strong>. Saving for a couch? Keep it <strong>Shared</strong>.</p>
+                <p>This is your custom wish list collection. From <strong>personal wishlists</strong> to <strong>household wishlists</strong>.</p>
+                <p>You can make lists <strong>Private</strong> for your eyes only, or <strong>Shared</strong> with the entire household.</p>
+                <p>After creating a wishlist, you can add specific items or goals to track.</p>
             </div>
         )
     };
@@ -396,11 +381,11 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                             {listType === 'shopping' ? (
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                                     <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white"><CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Items Pending</CardTitle><div className="text-2xl font-bold text-slate-800">{grandTotalItems.toLocaleString()}</div></Card>
-                                    <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white"><CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Est. Cost</CardTitle><div className="text-2xl font-bold text-blue-700">{currencySymbol}{grandTotalCost.toLocaleString()}</div></Card>
+                                    <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white"><CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Est. Cost</CardTitle><div className="text-2xl font-bold text-lime-700">{currencySymbol}{grandTotalCost.toLocaleString()}</div></Card>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                    {/* ⚡ UPDATED: Light Lime Cards for Wishlist Summary */}
+                                    {/* ⚡ UPDATED: Lime Cards for Wishlist Summary */}
                                     <Card className="rounded-2xl shadow-sm border border-lime-100 p-4 bg-lime-50/50 hover:bg-lime-100/50">
                                         <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-600 uppercase tracking-wider flex items-center gap-1"><Goal className="w-3 h-3" /> All Goals</CardTitle></CardHeader>
                                         <CardContent className="p-0">
@@ -412,15 +397,15 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                         <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-600 uppercase tracking-wider flex items-center gap-1"><PiggyBank className="w-3 h-3" /> Total Saved</CardTitle></CardHeader>
                                         <CardContent className="p-0"><div className="text-2xl font-bold text-lime-700 truncate">{currencySymbol}{grandTotalSaved.toLocaleString()}</div></CardContent>
                                     </Card>
-                                    <Card className="col-span-2 rounded-2xl shadow-sm border border-lime-100 p-4 bg-lime-50/50 hover:bg-lime-100/50">
-                                        <CardHeader className="p-0 pb-2"><CardTitle className="text-[10px] font-bold text-lime-600 uppercase tracking-wider">Overall Progress</CardTitle></CardHeader>
-                                        <CardContent className="p-0">
-                                            <div className="flex justify-between items-end mb-1">
-                                                <div className="text-xl font-bold text-lime-800">{Math.round(progress)}%</div>
-                                                <span className="text-[10px] text-slate-500 font-medium">Target: {currencySymbol}{grandTotalTarget.toLocaleString()}</span>
-                                            </div>
-                                            <Progress value={progress} className="h-1.5 bg-lime-200" indicatorClassName="bg-lime-500" />
-                                        </CardContent>
+                                    <Card className="col-span-2 rounded-2xl shadow-sm border border-lime-100 px-4 py-3 bg-lime-50/50 hover:bg-lime-100/50 flex flex-col justify-center">
+                                        <div className="flex justify-between items-center mb-1.5">
+                                            <CardTitle className="text-[10px] font-bold text-lime-600 uppercase tracking-wider">Overall Progress</CardTitle>
+                                            <span className="text-[10px] text-slate-500 font-medium">Target: {currencySymbol}{grandTotalTarget.toLocaleString()}</span>
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <Progress value={progress} className="h-2 bg-lime-100 flex-1" indicatorClassName="bg-lime-500" />
+                                            <span className="text-lg font-bold text-lime-800">{Math.round(progress)}%</span>
+                                        </div>
                                     </Card>
                                 </div>
                             )}
@@ -429,10 +414,9 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
                             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 {lists.map(list => (
-                                    // ⚡ UPDATED: Lime Theme for Wishlist Items
                                     <div key={list.id} onClick={() => setSelectedList(list)} className={`group relative cursor-pointer bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-lg transition-all ${listType === 'wishlist' ? 'hover:border-lime-200' : 'hover:border-blue-200'}`}>
                                         <div className="flex items-center gap-3 mb-3">
-                                            <div className={`p-2 rounded-xl ${listType === 'wishlist' ? 'bg-lime-50 text-lime-600' : 'bg-blue-50 text-blue-600'}`}>
+                                            <div className={`p-2 rounded-xl ${listType === 'wishlist' ? 'bg-lime-50 text-lime-600' : 'bg-lime-50 text-lime-600'}`}>
                                                 {getListIcon(list)}
                                             </div>
                                             <h3 className="font-bold text-slate-800 text-lg mb-0 truncate flex-1">{list.name}</h3>
@@ -445,7 +429,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                             {listType === 'shopping' ?
                                                 <>
                                                     <p className="text-xs text-slate-500">{list.pending_items} items pending</p>
-                                                    <p className="text-sm font-bold text-blue-700">{currencySymbol}{(list.estimated_cost || 0).toLocaleString()}</p>
+                                                    <p className="text-sm font-bold text-lime-700">{currencySymbol}{(list.estimated_cost || 0).toLocaleString()}</p>
                                                 </>
                                                 :
                                                 <>
@@ -523,7 +507,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
         if (Capacitor.isNativePlatform()) {
             const setupListener = async () => {
-                const { remove } = await CapApp.addListener('backButton', ({ canGoBack }: any) => {
+                const { remove } = await CapApp.addListener('backButton', ({ canGoBack }) => {
                     if (isListDetailActive) {
                         setIsListDetailActive(false);
                     } else if (isFabOpen) {
@@ -611,7 +595,8 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                                 {hideBalances ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </Button>
 
-                            {/* ⚡ UPDATED: Reverted to Violet/Purple Sync Button as requested */}
+                            {/* ⚡ NEW PROFILE/SETTINGS BUTTON (Moved to greeting click) */}
+
                             <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-lime-500 text-slate-900 rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-lime-600">
                                 <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Sync
                             </Button>
