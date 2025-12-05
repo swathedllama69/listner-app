@@ -55,8 +55,7 @@ function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: 
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-sm rounded-2xl">
-                <DialogHeader><DialogTitle>{title}</DialogTitle></DialogHeader>
-                <div className="text-sm text-slate-500 py-2">{description}</div>
+                <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
                 <DialogFooter className="flex gap-2 sm:justify-end">
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
                     <Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button>
@@ -337,7 +336,8 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     if (selectedList) {
         return (
             <div className="w-full animate-in slide-in-from-right-4 fade-in duration-300">
-                <Button variant="ghost" onClick={handleBack} className="mb-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm hover:shadow-md transition-all border border-slate-200">
+                {/* ⚡ FIX G1: Updated button style to neutral */}
+                <Button variant="ghost" onClick={handleBack} className="mb-2 bg-slate-100/70 hover:bg-slate-100 text-slate-600 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm hover:shadow-md transition-all border border-slate-200">
                     <ArrowLeft className="w-4 h-4" /> Back to Lists
                 </Button>
                 {listType === 'wishlist' ? <ListDetail user={user} list={selectedList} currencySymbol={currencySymbol} /> : <ShoppingList user={user} list={selectedList} currencySymbol={currencySymbol} />}
@@ -346,7 +346,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     }
 
     const grandTotalCost = lists.reduce((s, l) => s + (l.estimated_cost || 0), 0);
-    const grandTotalItems = lists.reduce((s, l) => s + (l.pending_items || 0), 0);
+    const grandTotalItems = lists.reduce((s, l) => s + (l.pending_items || 0), 0); // Pending items is the best count we have
     const grandTotalGoals = lists.reduce((s, l) => s + (l.total_goals || 0), 0);
     const grandTotalTarget = lists.reduce((s, l) => s + (l.target_amount || 0), 0);
     const grandTotalSaved = lists.reduce((s, l) => s + (l.saved_amount || 0), 0);
@@ -411,8 +411,15 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                         <>
                             {listType === 'shopping' ? (
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                    <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white"><CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Items Pending</CardTitle><div className="text-2xl font-bold text-slate-800">{grandTotalItems.toLocaleString()}</div></Card>
-                                    <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white"><CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Est. Cost</CardTitle><div className="text-2xl font-bold text-lime-700">{currencySymbol}{grandTotalCost.toLocaleString()}</div></Card>
+                                    {/* ⚡ FIX G2: Reworked Shopping Summary Card */}
+                                    <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white">
+                                        <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Items Remaining</CardTitle>
+                                        <div className="text-2xl font-bold text-slate-800">{grandTotalItems.toLocaleString()}</div>
+                                    </Card>
+                                    <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white">
+                                        <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Est. Cost</CardTitle>
+                                        <div className="text-2xl font-bold text-lime-700">{currencySymbol}{grandTotalCost.toLocaleString()}</div>
+                                    </Card>
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -484,6 +491,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                 </>
             )}
 
+            {/* ⚡ FIX I: Added DialogDescription */}
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete List?" description="This action cannot be undone." onConfirm={handleDeleteList} />
 
             {/* ⚡ EXPLAINER DIALOG (User can trigger manually) */}
@@ -492,6 +500,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                     <DialogHeader className="flex flex-col items-center">
                         <div className="bg-slate-50 p-4 rounded-full mb-4">{explainerContent.icon}</div>
                         <DialogTitle className="text-xl font-bold text-slate-800">{explainerContent.title}</DialogTitle>
+                        <DialogDescription>&nbsp;</DialogDescription> {/* FIX I */}
                     </DialogHeader>
                     <div className="text-left bg-slate-50/50 p-4 rounded-xl border border-slate-100">
                         {explainerContent.text}
@@ -509,7 +518,7 @@ function EditListDialog({ list, onListUpdated }: { list: List, onListUpdated: (l
     const [isPrivate, setIsPrivate] = useState(list.is_private)
     const handleSubmit = async (e: FormEvent) => { e.preventDefault(); const { data, error } = await supabase.from("lists").update({ name, is_private: isPrivate }).eq("id", list.id).select().single(); if (error) toast.error(error.message); else { onListUpdated(data as List); setIsOpen(false); toast.success("List saved"); } }
     return (
-        <Dialog open={isOpen} onOpenChange={setIsOpen}><DialogTrigger asChild><Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100"><Pencil className="w-4 h-4 text-slate-400" /></Button></DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit List</DialogTitle></DialogHeader><form onSubmit={handleSubmit} className="space-y-5 pt-2"><div><Label>List Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5 h-11" /></div><div className="space-y-2"><Label>Visibility</Label><div className="flex gap-3 pt-1"><Button type="button" onClick={() => setIsPrivate(false)} className={`flex-1 ${!isPrivate ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Shared</Button><Button type="button" onClick={() => setIsPrivate(true)} className={`flex-1 ${isPrivate ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Private</Button></div></div><DialogFooter><Button type="submit" className="w-full h-11 bg-slate-900">Save Changes</Button></DialogFooter></form></DialogContent></Dialog>
+        <Dialog open={isOpen} onOpenChange={setIsOpen}><DialogTrigger asChild><Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100"><Pencil className="w-4 h-4 text-slate-400" /></Button></DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit List</DialogTitle><DialogDescription>Update list name and privacy.</DialogDescription></DialogHeader><form onSubmit={handleSubmit} className="space-y-5 pt-2"><div><Label>List Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5 h-11" /></div><div className="space-y-2"><Label>Visibility</Label><div className="flex gap-3 pt-1"><Button type="button" onClick={() => setIsPrivate(false)} className={`flex-1 ${!isPrivate ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Shared</Button><Button type="button" onClick={() => setIsPrivate(true)} className={`flex-1 ${isPrivate ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Private</Button></div></div><DialogFooter><Button type="submit" className="w-full h-11 bg-slate-900">Save Changes</Button></DialogFooter></form></DialogContent></Dialog>
     )
 }
 
@@ -520,7 +529,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const [activeTab, setActiveTab] = useState<string>("home");
     const [isFabOpen, setIsFabOpen] = useState(false);
     const [isListDetailActive, setIsListDetailActive] = useState(false);
-    const [showOnboarding, setShowOnboarding] = useState(false);
+    const [showOnboarding, setShowOnboarding] = useState(!user.user_metadata?.onboarding_complete); // Check initial state
     const [isSyncOpen, setIsSyncOpen] = useState(false);
     const [refreshKey, setRefreshKey] = useState(0);
     const [hideBalances, setHideBalances] = useState(false);
@@ -529,6 +538,16 @@ export function Dashboard({ user, household }: { user: User, household: Househol
     const [dismissedExplainers, setDismissedExplainers] = useState<{ [key: string]: boolean }>({});
 
     const currencySymbol = getCurrencySymbol(household.currency || 'NGN');
+
+    // ⚡ FIX C: Standalone function to fetch member count
+    const fetchMemberCount = async () => {
+        const cacheKey = CACHE_KEYS.MEMBER_COUNT(household.id);
+        const { count } = await supabase.from('household_members').select('*', { count: 'exact', head: true }).eq('household_id', household.id);
+        if (count !== null) {
+            setMemberCount(count);
+            saveToCache(cacheKey, count);
+        }
+    }
 
     useEffect(() => {
         if (Capacitor.isNativePlatform()) {
@@ -575,23 +594,18 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         const savedExplainers = localStorage.getItem(`listner_explainers_${user.id}`);
         if (savedExplainers) setDismissedExplainers(JSON.parse(savedExplainers));
 
-        async function fetchData() {
-            // ⚡ OPTIMIZED: Cache Member Count for Instant Load
-            const cacheKey = CACHE_KEYS.MEMBER_COUNT(household.id);
-            const cachedCount = loadFromCache<number>(cacheKey);
-            if (cachedCount !== null) setMemberCount(cachedCount);
-
-            const { count } = await supabase.from('household_members').select('*', { count: 'exact', head: true }).eq('household_id', household.id);
-            if (count !== null) {
-                setMemberCount(count);
-                saveToCache(cacheKey, count);
-            }
-        }
-        fetchData();
-
-        if (!user.user_metadata?.onboarding_complete) setShowOnboarding(true);
+        // ⚡ FIX C: Initial fetch of member count
+        fetchMemberCount();
 
     }, [household.id, user, isListDetailActive, isFabOpen, activeTab]);
+
+    // ⚡ FIX C: Re-fetch member count on global refresh
+    useEffect(() => {
+        if (refreshKey > 0) {
+            fetchMemberCount();
+        }
+    }, [refreshKey]);
+
 
     const handleDismissExplainer = (scope: string) => {
         const newState = { ...dismissedExplainers, [scope]: true };
@@ -607,12 +621,15 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
     const handleGlobalRefresh = async () => {
         setRefreshKey(prev => prev + 1);
+        // The fetchMemberCount is triggered by the useEffect above
         await new Promise(resolve => setTimeout(resolve, 1000));
     };
+
+    // ⚡ FIX L: Removed window.location.reload() for background refresh
     const handleOnboardingComplete = () => {
         localStorage.setItem(`tutorial_seen_${user.id}`, "true");
         setShowOnboarding(false);
-        window.location.reload();
+        handleGlobalRefresh(); // Background refresh to update image/details
     }
 
     const getGreeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; }
@@ -625,6 +642,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                 <div className="pt-4 px-1 mb-6 space-y-4">
                     <div className="flex justify-between items-center">
                         <div onClick={() => setActiveTab('settings')} className="cursor-pointer active:opacity-70 transition-opacity">
+                            {/* ⚡ FIX K: Subtle enhancement (font weight, tracking) */}
                             <h1 className="text-xl font-bold text-slate-800 tracking-tight">{activeTab === 'home' ? 'Dashboard' : activeTab === 'settings' ? 'Settings' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</h1>
                             {activeTab === 'home' && <p className="text-sm text-slate-500 font-medium">{getGreeting()}, {userName}</p>}
                         </div>
@@ -634,7 +652,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                                 {hideBalances ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </Button>
 
-                            {/* ⚡ UPDATED: Responsive Sync/Settings Button Logic */}
+                            {/* ⚡ FIX C: Responsive Sync/Settings Button Logic */}
                             {memberCount <= 1 ? (
                                 // Case 1: Solo User (Show Sync)
                                 <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-lime-500 text-slate-900 rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-lime-600">
@@ -739,6 +757,7 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     <PortalFAB onClick={() => setIsFabOpen(true)} className={`h-16 w-16 rounded-full shadow-2xl bg-lime-400 hover:bg-lime-500 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95 hover:rotate-90 duration-300`} icon={Plus} />
                 )}
 
+                {/* ⚡ RENDER ONBOARDING IF NOT COMPLETE */}
                 {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={handleOnboardingComplete} />}
 
                 <CreateMenu

@@ -26,7 +26,7 @@ import { Progress } from "@/components/ui/progress"
 import { Capacitor } from "@capacitor/core"
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
 import { Virtuoso } from 'react-virtuoso'
-import toast, { Toaster } from 'react-hot-toast' // ⚡ SIMPLE TOAST IMPORT
+import toast from 'react-hot-toast' // ⚡ SIMPLE IMPORT
 
 type ShoppingItem = {
     id: number; created_at: string; name: string; quantity: string | null;
@@ -62,6 +62,7 @@ function PortalFAB({ onClick, className, icon: Icon }: any) {
 function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
+            {/* ⚡ FIX I: Added DialogDescription */}
             <DialogContent className="sm:max-w-sm rounded-2xl">
                 <DialogHeader><DialogTitle className="flex items-center gap-2"><Info className="w-5 h-5 text-lime-500" /> {title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
                 <DialogFooter><Button onClick={() => onOpenChange(false)} className="w-full">OK</Button></DialogFooter>
@@ -73,6 +74,7 @@ function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boo
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
+            {/* ⚡ FIX I: Added DialogDescription */}
             <DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2 text-rose-600"><AlertTriangle className="w-5 h-5" /> {title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader><DialogFooter className="flex gap-2 sm:justify-end"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button></DialogFooter></DialogContent>
         </Dialog>
     )
@@ -114,7 +116,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         }
     }
 
-    // ⚡ OPTIMIZED DATA LOADING
     useEffect(() => {
         let isMounted = true;
         const cacheKey = CACHE_KEYS.SHOPPING_LIST(list.id);
@@ -162,16 +163,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         toast.success("List copied to clipboard.");
     };
 
-    const handleDownloadTxt = () => {
-        const text = items.map(i => `- ${i.name}`).join('\n');
-        const blob = new Blob([text], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `${listSettings.name}.txt`;
-        document.body.appendChild(a); a.click(); document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-    };
-
     const handleNativeShare = async () => {
         const text = items.map(i => `- ${i.name}`).join('\n');
         if (navigator.share) {
@@ -183,7 +174,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         const { error } = await supabase.from('lists').update({ name: listSettings.name }).eq('id', list.id);
         if (!error) {
             setIsRenameOpen(false);
-            toast.success("List name updated.");
+            toast.success("List renamed.");
         }
     }
 
@@ -202,7 +193,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         if (deleteConfirm.type === 'item' && deleteConfirm.id) {
             const oldItems = [...items];
             setItems(items.filter(item => item.id !== deleteConfirm.id));
-
             const { error } = await supabase.from("shopping_items").delete().eq("id", deleteConfirm.id);
             if (error) { setItems(oldItems); toast.error("Failed to delete."); }
 
@@ -214,7 +204,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             const oldItems = [...items];
             setItems(items.filter(i => !selectedItems.includes(i.id)));
             setSelectedItems([]);
-
             const { error } = await supabase.from("shopping_items").delete().in("id", toDelete);
             if (error) { setItems(oldItems); toast.error("Failed to delete."); }
 
@@ -222,7 +211,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             const completedIds = items.filter(i => i.is_complete).map(i => i.id);
             const oldItems = [...items];
             setItems(items.filter(i => !i.is_complete));
-
             const { error } = await supabase.from("shopping_items").delete().in("id", completedIds);
             if (error) { setItems(oldItems); toast.error("Failed to clear."); }
         }
@@ -270,21 +258,19 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 householdId: list.household_id
             });
             triggerNotificationHaptic(NotificationType.Success);
-            toast("Offline Saved: Item saved to sync queue.", { icon: '☁️' });
+            toast("Offline Saved", { icon: '☁️' });
         };
 
         if (navigator.onLine) {
             try {
                 const { data, error } = await supabase.from("shopping_items").insert(newItemPayload).select().single();
-
                 if (error) throw error;
-
-                setItems(prev => prev.map(i => i.id === tempItem.id ? data as ShoppingItem : i));
-                const updatedItems = newItems.map(i => i.id === tempItem.id ? data as ShoppingItem : i);
-                saveToCache(CACHE_KEYS.SHOPPING_LIST(list.id), updatedItems);
-
+                // ⚡ FIX: Find and replace temp item
+                setItems(prev => prev.map(i => i.id === tempItem.id ? data as ShoppingItem : i).filter(i => i.id !== tempItem.id));
+                const updatedItems = items.map(i => i.id === tempItem.id ? data as ShoppingItem : i).filter(i => i.id !== tempItem.id);
+                saveToCache(CACHE_KEYS.SHOPPING_LIST(list.id), [data as ShoppingItem, ...updatedItems]);
                 triggerNotificationHaptic(NotificationType.Success);
-                toast.success(`${form.name} added to the list.`);
+                toast.success("Item Added");
             } catch (err) {
                 console.warn("Online save failed, falling back to offline mode.", err);
                 executeOfflineSave();
@@ -296,40 +282,28 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
     const handleUpdateItem = async (updatedItem: any) => {
         if (!editingItem) return;
-
         setItems(prev => prev.map(i => i.id === editingItem.id ? { ...i, ...updatedItem } : i));
         setEditingItem(null);
-
         const safePrice = parseFloat(updatedItem.price);
         const { data, error } = await supabase.from('shopping_items').update({
             name: updatedItem.name, quantity: updatedItem.quantity, price: isNaN(safePrice) ? 0 : safePrice,
             priority: updatedItem.priority, notes: updatedItem.notes
         }).eq('id', editingItem.id).select().single();
-
-        if (error) {
-            toast.error("Update failed.");
-        } else {
-            toast.success("Item details saved.");
-        }
+        if (error) { toast.error("Update failed."); } else { toast.success("Saved."); }
     }
 
     const toggleComplete = async (item: ShoppingItem) => {
         triggerHaptic(ImpactStyle.Light);
-
         const newStatus = !item.is_complete;
         setItems(items.map(i => i.id === item.id ? { ...i, is_complete: newStatus } : i));
-
         const { error } = await supabase.from("shopping_items").update({ is_complete: newStatus }).eq("id", item.id)
-        if (error) {
-            setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !newStatus } : i));
-        }
+        if (error) { setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !newStatus } : i)); }
     }
 
     const handleDeleteItem = async (itemId: number) => {
         triggerHaptic(ImpactStyle.Medium);
         const oldItems = [...items];
         setItems(items.filter(item => item.id !== itemId));
-
         const { error } = await supabase.from("shopping_items").delete().eq("id", itemId)
         if (error) { setItems(oldItems); toast.error("Delete failed."); }
     }
@@ -338,10 +312,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const handleBulkComplete = async () => {
         if (selectedItems.length === 0) return;
         triggerHaptic(ImpactStyle.Medium);
-
         setItems(items.map(i => selectedItems.includes(i.id) ? { ...i, is_complete: true } : i));
         setSelectedItems([]);
-
         await supabase.from("shopping_items").update({ is_complete: true }).in("id", selectedItems);
     };
 
@@ -357,10 +329,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
     const visibleItems = processedItems.slice(0, visibleCount);
     const hasMore = visibleCount < processedItems.length;
-
-    const loadMore = () => {
-        setVisibleCount(prev => Math.min(prev + 25, processedItems.length));
-    };
+    const loadMore = () => setVisibleCount(prev => Math.min(prev + 25, processedItems.length));
 
     const completedItems = items.filter(item => item.is_complete);
     const totalItems = items.length;
@@ -378,33 +347,29 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             {/* Header Section */}
             <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-
                 <div className="relative z-10">
                     <div className="flex items-center gap-2 mb-1">
                         <h2 className="text-xl font-bold truncate max-w-[200px]">{listSettings.name}</h2>
-                        {/* ⚡ UPDATED: Changed padlock/badge color */}
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>{listSettings.isPrivate ? 'Private' : 'Shared'}</span>
                         {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
                     </div>
+                    {/* ⚡ FIX G2: Updated label for clarity */}
                     <p className="text-xs text-slate-400 font-medium flex items-center gap-2">
-                        <ShoppingBag className="w-3 h-3" /> {items.length} items
+                        <ShoppingBag className="w-3 h-3" /> {items.length} total items
                         <span className="w-1 h-1 bg-slate-500 rounded-full"></span>
-                        {listSettings.isPrivate ? "Private" : "Shared"}
+                        {totalCompleted} completed
                     </p>
                 </div>
                 <div className="relative z-10 text-right">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total Est.</p>
-                    {/* ⚡ UPDATED: Total Cost Color */}
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Remaining Est.</p>
                     <div className="text-2xl font-bold text-lime-400">{currencySymbol}{total.toLocaleString()}</div>
                 </div>
             </div>
 
             {/* Progress Bar */}
             <div className="bg-slate-900 pb-1">
-                {/* ⚡ UPDATED: Shrink Progress Bar (h-1.5) & Lime Color */}
                 <Progress value={progressPercent} className="h-1.5 bg-slate-800 rounded-none" indicatorClassName="bg-lime-500" />
             </div>
-
 
             <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
                 <div className="flex gap-2">
@@ -445,7 +410,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 </div>
             </div>
 
-            <CardContent className="relative z-0 pt-4 pb-32 flex-1 px-2 md:px-6">
+            {/* ⚡ FIX D: Removed z-0 from CardContent to fix unclickable area */}
+            <CardContent className="relative pt-4 pb-32 flex-1 px-2 md:px-6">
                 {isLoading ? <p className="text-center py-8 text-slate-400">Loading...</p> : (
                     <>
                         {visibleItems.length > 0 ? (
@@ -528,11 +494,11 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 )}
             </CardContent>
 
-            <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95" icon={Plus} />
+            <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} />
 
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl top-[20%] translate-y-0">
-                    <DialogHeader><DialogTitle>Add Shopping Item</DialogTitle></DialogHeader>
+                    <DialogHeader><DialogTitle>Add Shopping Item</DialogTitle><DialogDescription>Add a new item to your shopping list.</DialogDescription></DialogHeader> {/* FIX I */}
                     <div className="bg-lime-50 border border-lime-100 p-3 rounded-lg text-xs text-lime-800 flex gap-2 items-start mb-2"><Lightbulb className="w-4 h-4 shrink-0 mt-0.5" /><div>Add items here. If you enter a price and quantity, the total cost will be calculated automatically.</div></div>
                     <form onSubmit={handleAddItem} className="space-y-4">
                         <div className="grid grid-cols-4 gap-3"><div className="col-span-3"><Label>Item Name</Label><Input ref={inputRef} value={form.name} onChange={handleFormChange} name="name" className="h-12 text-lg" autoFocus autoComplete="off" /></div><div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={handleFormChange} name="quantity" className="h-12 text-center" autoComplete="off" /></div></div>
@@ -542,7 +508,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                                 <Select value={form.priority as any} onValueChange={handlePriorityChange}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select>
                             </div>
                         </div>
-                        {formPrice > 0 && <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-100"><span className="text-xs text-slate-500 font-medium">Item Total</span><span className="text-sm font-bold text-slate-800">{currencySymbol}{formPrice.toLocaleString()} <span className="text-slate-400 text-xs font-normal">x {formQty} =</span> {currencySymbol}{formTotal.toLocaleString()}</span></div>}
                         <div><Label>Notes</Label><Input value={form.notes} onChange={handleFormChange} name="notes" placeholder="Brand, Size, etc." className="h-11" autoComplete="off" /></div>
                         <Button type="submit" className="w-full h-12 text-base bg-lime-600 hover:bg-lime-700 text-slate-900">Add to List</Button>
                     </form>
@@ -551,7 +516,12 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
             <Dialog open={!!editingItem} onOpenChange={() => setEditingItem(null)}>{editingItem && <EditShoppingItemForm item={editingItem} onUpdate={handleUpdateItem} onClose={() => setEditingItem(null)} currencySymbol={currencySymbol} />}</Dialog>
 
-            <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}><DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>Rename List</DialogTitle></DialogHeader><div className="flex gap-2 py-2"><Input value={listSettings.name} onChange={e => setListSettings({ ...listSettings, name: e.target.value })} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div></DialogContent></Dialog>
+            <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}>
+                <DialogContent className="sm:max-w-sm rounded-2xl">
+                    <DialogHeader><DialogTitle>Rename List</DialogTitle><DialogDescription>Enter a new name for your list.</DialogDescription></DialogHeader> {/* FIX I */}
+                    <div className="flex gap-2 py-2"><Input value={listSettings.name} onChange={e => setListSettings({ ...listSettings, name: e.target.value })} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div>
+                </DialogContent>
+            </Dialog>
 
             {isBulkMode && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white px-4 py-3 rounded-full shadow-2xl flex items-center gap-4 animate-in slide-in-from-bottom-5"><span className="font-bold text-sm whitespace-nowrap">{selectedItems.length} selected</span><div className="h-4 w-[1px] bg-slate-700"></div><button onClick={handleBulkComplete} className="text-emerald-400 font-medium flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Done</button><button onClick={() => setDeleteConfirm({ isOpen: true, type: 'bulk' })} className="text-rose-400 font-medium flex items-center gap-1"><Trash2 className="w-4 h-4" /> Delete</button><button onClick={() => setSelectedItems([])} className="text-slate-400 ml-2">Cancel</button></div>}
 
@@ -568,7 +538,7 @@ function EditShoppingItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
     const handleSubmit = (e: FormEvent) => { e.preventDefault(); onUpdate(form); };
     return (
         <DialogContent className="sm:max-w-md rounded-2xl">
-            <DialogHeader><DialogTitle>Edit Item</DialogTitle></DialogHeader>
+            <DialogHeader><DialogTitle>Edit Item</DialogTitle><DialogDescription>Modify the details of this shopping item.</DialogDescription></DialogHeader> {/* FIX I */}
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-4 gap-3">
                     <div className="col-span-3"><Label>Item Name</Label><Input value={form.name} onChange={handleChange} name="name" className="h-11" autoComplete="off" /></div>

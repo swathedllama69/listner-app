@@ -89,6 +89,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 if (memError) throw memError;
 
                 setCurrentHouseholdId(hh.id);
+                setView('profile_setup'); // Advance to profile setup
 
             } else {
                 if (!codeToUse) throw new Error("Missing invite code");
@@ -109,43 +110,55 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     if (joinError) throw joinError;
                 }
                 setCurrentHouseholdId(hh.id);
+                // ⚡ FIX B: Advance to profile setup to complete onboarding flags
+                setView('profile_setup');
             }
-            setView('profile_setup');
         } catch (err: any) {
             console.error(err);
             setError(err.message || "Something went wrong.");
         } finally { setLoading(false); }
     };
 
+    // --- STEP 2: AVATAR & NAME SAVE ---
+    const handleProfileContinue = async () => {
+        if (!displayName.trim()) return;
+        setView('currency_setup');
+    }
+
+
     // --- STEP 3: FINAL SUBMISSION ---
     const handleFinalSubmit = async () => {
         setLoading(true);
         if (!currentHouseholdId) {
-            alert("Error: Missing household ID.");
+            setError("Error: Missing household ID. Please restart the process.");
             setLoading(false);
             return;
         }
 
         try {
+            // 1. Update Auth Metadata and Profiles table with latest display name/avatar
             await supabase.auth.updateUser({
                 data: { full_name: displayName, avatar_url: avatarUrl, onboarding_complete: true }
             });
 
+            // 2. Update/Insert Profile
             const { data: profileData, error: profileError } = await supabase.from('profiles').update({
-                full_name: displayName, avatar_url: avatarUrl,
+                full_name: displayName, avatar_url: avatarUrl, has_seen_tutorial: false // Resetting tutorial ensures page.tsx correctly routes to TUTORIAL stage
             }).eq('id', user.id).select();
 
             if (profileError || !profileData || profileData.length === 0) {
-                await supabase.from('profiles').insert({ id: user.id, full_name: displayName, avatar_url: avatarUrl, email: user.email, username: user.email?.split('@')[0] });
+                await supabase.from('profiles').insert({ id: user.id, full_name: displayName, avatar_url: avatarUrl, email: user.email, username: user.email?.split('@')[0], has_seen_tutorial: false });
             }
 
+            // 3. Update Household Currency/Country (Only needed if created, but safe to update if joined too)
             await supabase.from('households').update({ country, currency }).eq('id', currentHouseholdId);
 
-            await new Promise(resolve => setTimeout(resolve, 500));
+            // 4. Trigger reload of user data in parent component
+            await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for DB consistency
             onHouseholdCreated(user);
         } catch (e: any) {
             console.error(e);
-            alert("Setup Failed: " + e.message);
+            setError("Setup Failed: " + e.message);
         } finally { setLoading(false); }
     };
 
@@ -171,8 +184,9 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
 
     const handleScan = async () => {
         if (!Capacitor.isNativePlatform()) {
-            setInviteCode("MOCK_CODE_123");
-            handleHouseholdSubmit("MOCK_CODE_123");
+            // ⚡ REMOVED MOCK CODE REDIRECT
+            // handleHouseholdSubmit("MOCK_CODE_123");
+            alert("QR Code scanner is only available on the native app.");
             return;
         }
         try {
@@ -273,10 +287,11 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         return (
             <div className="relative flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 overflow-hidden">
                 <AnimatedBackground />
+                {/* ⚡ FIX A: Profile setup no longer automatically advances. Must click continue. */}
                 <Card className="relative z-10 w-full max-w-sm border-none shadow-2xl bg-white/95 backdrop-blur rounded-[2rem] p-8 space-y-8 animate-in zoom-in-95 duration-500">
                     <div className="text-center mt-8"><h1 className="text-2xl font-bold text-slate-900">One last thing</h1><p className="text-slate-500 mt-2 text-sm font-medium">Add a photo so others know it's you.</p></div>
                     <div className="flex justify-center"><div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}><div className="h-32 w-32 rounded-full bg-slate-50 border-4 border-white shadow-xl overflow-hidden flex items-center justify-center transition-all group-hover:scale-105">{avatarUrl ? <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <UserIcon className="w-12 h-12 text-slate-300" />}{uploading && <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm"><Loader2 className="w-8 h-8 text-white animate-spin" /></div>}</div><div className="absolute bottom-1 right-1 bg-slate-900 text-white p-2.5 rounded-full border-4 border-white shadow-lg group-hover:bg-lime-600 transition-colors"><Camera className="w-5 h-5" /></div></div><input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} /></div>
-                    <div className="space-y-4"><div className="space-y-2 text-center"><Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Display Name</Label><Input placeholder="e.g. John" value={displayName} onChange={e => setDisplayName(e.target.value)} className="h-14 bg-slate-50 border-slate-200 text-center text-lg font-bold rounded-2xl focus:bg-white transition-all" /></div><Button onClick={() => setView('currency_setup')} disabled={loading || !displayName.trim()} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white text-lg font-bold rounded-2xl shadow-xl shadow-slate-200 transition-all active:scale-95">Continue <ArrowRight className="w-5 h-5 ml-2" /></Button></div>
+                    <div className="space-y-4"><div className="space-y-2 text-center"><Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Display Name</Label><Input placeholder="e.g. John" value={displayName} onChange={e => setDisplayName(e.target.value)} className="h-14 bg-slate-50 border-slate-200 text-center text-lg font-bold rounded-2xl focus:bg-white transition-all" /></div><Button onClick={handleProfileContinue} disabled={loading || uploading || !displayName.trim()} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white text-lg font-bold rounded-2xl shadow-xl shadow-slate-200 transition-all active:scale-95">Continue <ArrowRight className="w-5 h-5 ml-2" /></Button></div>
                 </Card>
             </div>
         );

@@ -35,6 +35,7 @@ export default function Home() {
 
 // --- AUTH WRAPPER ---
 function AuthWrapper() {
+  // ⚡ MODIFIED: Retain 'TUTORIAL' stage
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP' | 'ERROR'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
@@ -168,6 +169,7 @@ function AuthWrapper() {
       if (stage !== 'APP') {
         if (currentHousehold) {
           // If household exists, check if tutorial is seen
+          // ⚡ MODIFIED: Transition to TUTORIAL if not seen, else APP
           setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
         } else {
           // If no household, go to setup
@@ -251,7 +253,7 @@ function AuthWrapper() {
     const { data: { session } } = await supabase.auth.getSession();
 
     if (session?.user) {
-      if (currentStage === 'APP' || currentStage === 'SETUP_HOUSEHOLD') {
+      if (currentStage === 'APP' || currentStage === 'SETUP_HOUSEHOLD' || currentStage === 'TUTORIAL') {
         attemptReconnect();
       } else {
         try {
@@ -309,7 +311,12 @@ function AuthWrapper() {
             if (!isProcessingDeepLink.current) setStage('AUTH');
           }
         } catch (err: any) {
-          setTimeout(init, 3000);
+          // ⚡ MODIFIED: Retry logic for robustness
+          if (session?.user) {
+            setTimeout(init, 3000);
+          } else {
+            setStage('AUTH');
+          }
         }
       }
     };
@@ -332,7 +339,6 @@ function AuthWrapper() {
   }, []);
 
   // --- TUTORIAL HANDLERS ---
-
   // Permanent completion (saves to DB)
   const handleTutorialComplete = async () => {
     if (!user) return;
@@ -342,10 +348,9 @@ function AuthWrapper() {
     localStorage.setItem(`tutorial_seen_${user.id}`, "true");
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
 
-    // ⚡ FIX: Add 500ms delay to beat the network latency before forcing the final reload.
-    await new Promise(resolve => setTimeout(resolve, 500));
-
-    window.location.reload();
+    // ⚡ MODIFIED: Instead of reloading, trigger an immediate background refresh and transition to APP.
+    await loadUserData(user);
+    setStage('APP');
   };
 
   // Temporary close (shows again next time)

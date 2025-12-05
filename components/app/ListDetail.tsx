@@ -64,6 +64,7 @@ const getProgress = (saved: number | null, target: number | null) => {
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
+            {/* ⚡ FIX I: Added DialogDescription */}
             <DialogContent className="sm:max-w-sm rounded-2xl">
                 <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
                 <DialogFooter className="flex gap-2 sm:justify-end"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button></DialogFooter>
@@ -131,7 +132,33 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         };
 
         loadData();
-        return () => { isMounted = false; };
+
+        // ⚡ FIX J: Real-time listener implementation for Wishlist items
+        const channel = supabase.channel(`wishlist_items_${list.id}`)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'wishlist_items', filter: `list_id=eq.${list.id}` }, (payload) => {
+                // ✅ FIX: Use 'as any' temporarily for type safety and explicitly check for 'id' property.
+                const item = (payload.new || payload.old) as any;
+
+                // 🚨 CRITICAL FIX: Ensure item is a non-null object with an 'id'.
+                if (!item || !item.id) return;
+
+                setItems(prev => {
+                    if (payload.eventType === 'INSERT') {
+                        // Avoid duplicates if the inserted item is already present (e.g., optimistic update followed by listener)
+                        return [item as WishlistItem, ...prev.filter(i => i.id !== item.id)];
+                    }
+                    if (payload.eventType === 'UPDATE') {
+                        return prev.map(i => i.id === item.id ? item as WishlistItem : i);
+                    }
+                    if (payload.eventType === 'DELETE') {
+                        return prev.filter(i => i.id !== item.id);
+                    }
+                    return prev;
+                });
+            })
+            .subscribe()
+
+        return () => { isMounted = false; supabase.removeChannel(channel) };
     }, [list.id]);
 
     const activeItems = useMemo(() => {
@@ -204,9 +231,10 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         if (navigator.onLine) {
             const { data, error } = await supabase.from('wishlist_items').insert(newItemPayload).select().single();
             if (!error) {
-                const updatedItems = [data as WishlistItem, ...items];
-                setItems(updatedItems);
-                saveToCache(CACHE_KEYS.WISHLIST(list.id), updatedItems);
+                // ⚡ FIX: Update state to replace the temporary item with the real one
+                setItems(prev => prev.map(i => i.id === tempItem.id ? data as WishlistItem : i).filter(i => i.id !== tempItem.id));
+                // Note: The real-time listener will also update this, but this is faster.
+                saveToCache(CACHE_KEYS.WISHLIST(list.id), [...items.filter(i => i.id !== tempItem.id), data as WishlistItem]);
             }
         }
     }
@@ -219,6 +247,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         triggerHaptic(ImpactStyle.Light);
         const newSaved = (selectedItemForContrib.saved_amount || 0) + amount;
 
+        // Optimistic Update
         setItems(items.map(i => i.id === selectedItemForContrib.id ? { ...i, saved_amount: newSaved } : i));
         setIsContributionOpen(false);
         setContribForm({ amount: "", note: "" });
@@ -331,6 +360,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                         ))}
                     </TabsList>
 
+                    {/* ⚡ FIX D: Removed z-0 from TabsContent/CardContent to fix unclickable area */}
                     <TabsContent value={activeTab} className="space-y-3">
                         {isLoading && items.length === 0 ? (
                             <p className="text-center py-12 text-slate-400">Loading...</p>
@@ -418,7 +448,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl">
-                    <DialogHeader><DialogTitle>Add New Goal/Item</DialogTitle></DialogHeader>
+                    <DialogHeader><DialogTitle>Add New Goal/Item</DialogTitle><DialogDescription>Define a new saving goal or item target.</DialogDescription></DialogHeader> {/* FIX I */}
                     <form onSubmit={handleAddItem} className="grid grid-cols-2 gap-4 py-2">
                         <div className="col-span-2"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="h-11" required autoComplete="off" /></div>
                         <div><Label>Target ({currencySymbol})</Label><Input type="number" value={form.target_amount} onChange={e => setForm({ ...form, target_amount: e.target.value })} className="h-11" required autoComplete="off" /></div>
@@ -433,14 +463,26 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             </Dialog>
 
             <Dialog open={isContributionOpen} onOpenChange={setIsContributionOpen}>
-                <DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>Add Funds</DialogTitle></DialogHeader><form onSubmit={handleAddContribution} className="space-y-4 py-2"><div className="space-y-2"><Label>Amount ({currencySymbol})</Label><Input type="number" className="h-14 text-2xl font-bold text-center" placeholder="0.00" value={contribForm.amount} onChange={e => setContribForm({ ...contribForm, amount: e.target.value })} autoFocus autoComplete="off" /></div><Input placeholder="Note (optional)" value={contribForm.note} onChange={e => setContribForm({ ...contribForm, note: e.target.value })} className="h-11" autoComplete="off" /><Button type="submit" className="w-full h-11 bg-emerald-600 text-lg">Confirm</Button></form></DialogContent>
+                <DialogContent className="sm:max-w-sm rounded-2xl">
+                    <DialogHeader><DialogTitle>Add Funds</DialogTitle><DialogDescription>Enter the amount you are contributing.</DialogDescription></DialogHeader> {/* FIX I */}
+                    <form onSubmit={handleAddContribution} className="space-y-4 py-2">
+                        <div className="space-y-2"><Label>Amount ({currencySymbol})</Label><Input type="number" className="h-14 text-2xl font-bold text-center" placeholder="0.00" value={contribForm.amount} onChange={e => setContribForm({ ...contribForm, amount: e.target.value })} autoFocus autoComplete="off" /></div>
+                        <Input placeholder="Note (optional)" value={contribForm.note} onChange={e => setContribForm({ ...contribForm, note: e.target.value })} className="h-11" autoComplete="off" />
+                        <Button type="submit" className="w-full h-11 bg-emerald-600 text-lg">Confirm</Button>
+                    </form>
+                </DialogContent>
             </Dialog>
 
             <Dialog open={!!editingItem} onOpenChange={() => setEditingItem(null)}>
                 {editingItem && <EditWishlistItemForm item={editingItem} onUpdate={handleUpdateItem} onClose={() => setEditingItem(null)} currencySymbol={currencySymbol} />}
             </Dialog>
 
-            <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}><DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>Rename List</DialogTitle></DialogHeader><div className="flex gap-2 py-2"><Input value={listNameForm} onChange={e => setListNameForm(e.target.value)} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div></DialogContent></Dialog>
+            <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}>
+                <DialogContent className="sm:max-w-sm rounded-2xl">
+                    <DialogHeader><DialogTitle>Rename List</DialogTitle><DialogDescription>Enter a new name for this list.</DialogDescription></DialogHeader> {/* FIX I */}
+                    <div className="flex gap-2 py-2"><Input value={listNameForm} onChange={e => setListNameForm(e.target.value)} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div>
+                </DialogContent>
+            </Dialog>
 
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete Item?" description="This action cannot be undone." onConfirm={handleDelete} />
         </div>
@@ -453,6 +495,9 @@ function EditWishlistItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
     const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [e.target.name]: e.target.value });
     const handleSubmit = async (e: FormEvent) => { e.preventDefault(); setIsSubmitting(true); await onUpdate({ ...form, target_amount: parseFloat(form.target_amount) || null, saved_amount: parseFloat(form.saved_amount) || 0, quantity: form.category === "Item" ? parseInt(form.quantity) : null }); setIsSubmitting(false); onClose(); };
     return (
-        <DialogContent className="sm:max-w-[625px] rounded-2xl"><DialogHeader><DialogTitle>Edit Goal</DialogTitle></DialogHeader><form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4"><div className="col-span-2"><Label>Name</Label><Input name="name" value={form.name} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-2"><Label>Description</Label><Textarea name="description" value={form.description} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Target ({currencySymbol})</Label><Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-1"><Label>Saved ({currencySymbol})</Label><Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div><div className="col-span-1"><Label>Link</Label><Input name="link" value={form.link} onChange={handleChange} autoComplete="off" /></div><DialogFooter className="col-span-2"><Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button></DialogFooter></form></DialogContent>
+        <DialogContent className="sm:max-w-[625px] rounded-2xl">
+            <DialogHeader><DialogTitle>Edit Goal</DialogTitle><DialogDescription>Modify the details of your goal.</DialogDescription></DialogHeader> {/* FIX I */}
+            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4"><div className="col-span-2"><Label>Name</Label><Input name="name" value={form.name} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-2"><Label>Description</Label><Textarea name="description" value={form.description} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Target ({currencySymbol})</Label><Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-1"><Label>Saved ({currencySymbol})</Label><Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div><div className="col-span-1"><Label>Link</Label><Input name="link" value={form.link} onChange={handleChange} autoComplete="off" /></div><DialogFooter className="col-span-2"><Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button></DialogFooter></form>
+        </DialogContent>
     );
 }

@@ -11,7 +11,7 @@ import {
     ChevronDown, ChevronLeft, ChevronRight, Download,
     Lightbulb, FileSpreadsheet, User as UserIcon, Home as HomeIcon,
     Plus, RefreshCw, Undo2, ShoppingBasket, Car, Zap, Home, Ticket, Gift,
-    Briefcase, Coffee, GraduationCap, HeartPulse, MoreHorizontal, Sun
+    Briefcase, Coffee, GraduationCap, HeartPulse, MoreHorizontal, Sun, AlertTriangle
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -66,7 +66,16 @@ const downloadCSV = (content: string, filename: string) => {
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader><DialogFooter className="flex gap-2 sm:justify-end"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button></DialogFooter></DialogContent>
+            <DialogContent className="sm:max-w-sm rounded-2xl">
+                <DialogHeader>
+                    <DialogTitle>{title}</DialogTitle>
+                    <DialogDescription>{description}</DialogDescription> {/* FIX I */}
+                </DialogHeader>
+                <DialogFooter className="flex gap-2 sm:justify-end">
+                    <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+                    <Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button>
+                </DialogFooter>
+            </DialogContent>
         </Dialog>
     )
 }
@@ -80,14 +89,25 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     useEffect(() => {
         async function fetchFinanceData() {
             setIsLoading(true);
-            const { data: memberData } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
-            if (memberData) {
+
+            // ⚡ FIX F: RLS/Join workaround not implemented as syntax is correct, relying on RLS/schema being correct.
+            const { data: memberData, error: memberError } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
+
+            if (memberError) {
+                console.error("Member data fetch failed (400?):", memberError);
+                // Fallback: fetch members without join if join fails
+                const { data: fallbackData } = await supabase.from('household_members').select('user_id').eq('household_id', household.id);
+                if (fallbackData) {
+                    setMembers(fallbackData.map((m: any) => ({ user_id: m.user_id, email: m.user_id === user.id ? user.email || 'You' : 'Partner' })));
+                }
+            } else if (memberData) {
                 const mappedMembers = memberData.map((m: any) => ({
                     user_id: m.user_id,
                     email: m.profiles?.email || 'Partner'
                 }));
                 setMembers(mappedMembers);
             }
+
 
             const { data: expenseData } = await supabase.from('expenses').select('*').eq('household_id', household.id).order('expense_date', { ascending: false });
             if (expenseData) setExpenses(expenseData as Expense[]);
@@ -157,7 +177,8 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
         <TooltipProvider>
             <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
                 <div className="px-4 pt-2 pb-4">
-                    <div className={`rounded-2xl px-6 py-3 flex items-center justify-between shadow-md ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
+                    {/* ⚡ FIX H1: Card rounding changed to rounded-xl */}
+                    <div className={`rounded-xl px-6 py-3 flex items-center justify-between shadow-md ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
                         <div className="flex flex-col">
                             <span className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest">Net Position</span>
                             {!isZero && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
@@ -586,11 +607,25 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
         let lenderName = isOweMe ? 'Me' : form.personName; let borrowerName = !isOweMe ? 'Me' : form.personName;
 
-        let finalScope = 'household';
-        if (partnerId && !form.personName) {
+        let finalScope = 'personal'; // ⚡ NEW DEFAULT: Assume personal unless explicitly tied to partner
+
+        // Check if there's a partner and if the name field is empty/default (implying system partner debt)
+        const isPartnerDebt = partnerId && !isSingleUser && form.personName.toLowerCase() === 'partner';
+
+        if (isPartnerDebt) {
+            finalScope = 'household';
             if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
             else { lenderId = partnerId; lenderName = 'Partner'; }
+        } else if (partnerId && !isSingleUser && !form.personName) {
+            // No name entered, auto-assume partner in a two-user household
+            finalScope = 'household';
+            if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
+            else { lenderId = partnerId; lenderName = 'Partner'; }
+        } else if (form.personName) {
+            // Custom name entered, this is a personal debt (scope is already 'personal')
+            finalScope = 'personal';
         } else {
+            // Default personal debt (no name, no partner assumed)
             finalScope = 'personal';
         }
 
@@ -619,9 +654,27 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
         let lenderName = isOweMe ? 'Me' : updated.personName; let borrowerName = !isOweMe ? 'Me' : updated.personName;
 
-        if (partnerId && !updated.personName && !isSingleUser) {
+        let finalScope = updated.scope; // Keep existing scope unless explicitly changed
+
+        // ⚡ NEW FINANCE LOGIC: Check if the user is forcing this to be a partner debt via the name field (or it was already one)
+        const isPartnerDebt = partnerId && !isSingleUser && (updated.personName.toLowerCase() === 'partner' || editingCredit.scope === 'household');
+
+        if (isPartnerDebt) {
+            finalScope = 'household';
+            // Only assign system IDs if the name is 'Partner' or if it was an existing household debt
             if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
             else { lenderId = partnerId; lenderName = 'Partner'; }
+        } else {
+            // Custom name or solo/non-partner debt
+            finalScope = 'personal';
+            // Clear system IDs if a custom name is used for a personal debt
+            if (isOweMe) { borrowerId = null; borrowerName = updated.personName; }
+            else { lenderId = null; lenderName = updated.personName; }
+        }
+
+        // Always ensure one of the IDs is the current user if the opposite is null
+        if (!lenderId && !borrowerId) {
+            if (isOweMe) lenderId = user.id; else borrowerId = user.id;
         }
 
         const { error, data } = await supabase.from('credits').update({
@@ -631,7 +684,7 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
             lender_name: lenderName,
             borrower_user_id: borrowerId,
             borrower_name: borrowerName,
-            scope: updated.scope
+            scope: finalScope
         }).eq('id', editingCredit.id).select().single();
 
         if (error) toast.error(error.message);
@@ -660,7 +713,11 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
                             <DialogDescription>Track money you owe or is owed to you.</DialogDescription>
                         </DialogHeader>
                         <form onSubmit={handleAddCredit} className="space-y-3 pt-2">
-                            <div className="grid grid-cols-2 gap-3"><Button type="button" variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button><Button type="button" variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button></div><div className="grid grid-cols-2 gap-3"><Input type="number" placeholder={`Amount (${currencySymbol})`} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required className="bg-white h-10" /><Input placeholder={partnerId && !isSingleUser ? "Partner (Default)" : "Name (e.g. Bank)"} value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} disabled={!!(partnerId && !isSingleUser)} className="bg-white h-10" /></div><Input placeholder="What for? (e.g. Dinner)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-white h-10" /><Button type="submit" className="w-full bg-slate-900 text-white h-11 font-bold">Log Debt</Button>
+                            <div className="grid grid-cols-2 gap-3"><Button type="button" variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button><Button type="button" variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button></div><div className="grid grid-cols-2 gap-3">
+                                <Input type="number" placeholder={`Amount (${currencySymbol})`} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required className="bg-white h-10" />
+                                {/* ⚡ NEW FINANCE LOGIC: Allow custom name, disable if auto-partner is assumed */}
+                                <Input placeholder={partnerId && !isSingleUser && !form.personName ? "Partner (Default)" : "Name (e.g. Bank)"} value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} className="bg-white h-10" />
+                            </div><Input placeholder="What for? (e.g. Dinner)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-white h-10" /><Button type="submit" className="w-full bg-slate-900 text-white h-11 font-bold">Log Debt</Button>
                         </form>
                     </DialogContent>
                 </Dialog>
@@ -735,7 +792,11 @@ function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, cur
         scope: credit.scope
     });
 
-    const isSystemUser = (credit.lender_user_id === userId && credit.borrower_user_id) || (credit.borrower_user_id === userId && credit.lender_user_id);
+    // Determine if this is a system-linked debt that we should auto-fill the name for, but still allow manual override.
+    const isSystemLinked = (credit.lender_user_id === userId && credit.borrower_user_id === partnerId) || (credit.borrower_user_id === userId && credit.lender_user_id === partnerId);
+
+    // Set placeholder based on system link status
+    const namePlaceholder = isSystemLinked ? "Partner (Linked)" : "Name (e.g. Bank)";
 
     return (
         <div className="space-y-4 py-2">
@@ -753,8 +814,9 @@ function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, cur
             </div>
             <div>
                 <Label>Person / Entity</Label>
-                <Input value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} placeholder="Name" />
-                {isSystemUser && <p className="text-[10px] text-slate-400 mt-1">Currently linked to Partner.</p>}
+                {/* ⚡ NEW FINANCE LOGIC: Allow manual change, with system hint */}
+                <Input value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} placeholder={namePlaceholder} />
+                {isSystemLinked && <p className="text-[10px] text-slate-400 mt-1">This is automatically linked to your Partner's profile.</p>}
             </div>
             <div>
                 <Label>Notes</Label>
