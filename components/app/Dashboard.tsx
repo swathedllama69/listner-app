@@ -9,20 +9,20 @@ import { App as CapApp } from "@capacitor/app"
 import { StatusBar, Style } from "@capacitor/status-bar"
 import { PushNotifications } from "@capacitor/push-notifications"
 
-// UI Imports (Ensure all used components are here)
+// UI Imports
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt, Loader2, ArrowDown, ListChecks, CheckCircle2, Goal, TrendingUp, ArrowDownRight, User as UserIcon } from "lucide-react"
+import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt, Loader2, ArrowDown, ListChecks, CheckCircle2, Goal, TrendingUp, ArrowDownRight, User as UserIcon, Settings } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
+import { Skeleton } from "@/components/ui/skeleton"
 
-// ⚡ REAL IMPORTS (Using your existing files)
 import { SidebarLayout } from "@/components/ui/SidebarLayout"
 import { ListDetail } from "@/components/app/ListDetail"
 import { ShoppingList } from "@/components/app/ShoppingList"
@@ -34,6 +34,9 @@ import { SettingsView } from "@/components/app/SettingsView"
 import { NotificationBell } from "@/components/app/NotificationBell"
 import { Household, List } from "@/lib/types"
 import { getCurrencySymbol, EXPENSE_CATEGORIES } from "@/lib/constants"
+import { compressImage } from "@/lib/utils"
+import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
+import toast, { Toaster } from 'react-hot-toast' // ⚡ IMPORT TOASTER
 
 // --- TYPES ---
 type ListWithSummary = List & {
@@ -47,9 +50,7 @@ type ListSummary = {
     total_goals?: number; completed_goals?: number;
 };
 
-
-// --- AUXILIARY HELPER COMPONENTS (Required by ListManager/SettingsView) ---
-
+// --- AUXILIARY HELPER COMPONENTS ---
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -120,32 +121,6 @@ function PullToRefresh({ onRefresh, children }: { onRefresh: () => Promise<void>
     );
 }
 
-// ⚡ IMAGE COMPRESSION (Needed by SettingsView, placed here to avoid conflict)
-const compressImage = (file: File): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            if (!ctx) { reject(new Error("Canvas not supported")); return; }
-            const MAX_SIZE = 800;
-            let width = img.width; let height = img.height;
-            if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } }
-            else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
-            canvas.width = width; canvas.height = height;
-            ctx.drawImage(img, 0, 0, width, height);
-            canvas.toBlob((blob) => {
-                if (!blob) { reject(new Error("Compression failed")); return; }
-                resolve(blob);
-            }, 'image/jpeg', 0.7);
-        };
-        img.onerror = (error) => reject(error);
-    });
-}
-// -------------------------------------------------------------------------
-
-
 // --- CREATE MENU ---
 function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess, currencySymbol, viewScope }: {
     isOpen: boolean, onOpenChange: (open: boolean) => void, context: string, user: User, household: Household, onSuccess: () => void, currencySymbol: string, viewScope: 'unified' | 'household' | 'solo'
@@ -176,7 +151,14 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
             user_id: user.id, household_id: household.id, name: expForm.name, amount: parseFloat(expForm.amount), category: expForm.category, scope: expForm.scope, expense_date: new Date().toISOString(),
         });
         setLoading(false);
-        if (!error) { setExpForm({ name: '', amount: '', category: EXPENSE_CATEGORIES[0], scope: defaultScope }); onOpenChange(false); onSuccess(); }
+        if (!error) {
+            setExpForm({ name: '', amount: '', category: EXPENSE_CATEGORIES[0], scope: defaultScope });
+            onOpenChange(false);
+            onSuccess();
+            toast.success("Expense logged!");
+        } else {
+            toast.error(error.message);
+        }
     };
 
     const handleList = async () => {
@@ -186,7 +168,14 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
             name: listForm.name, household_id: household.id, owner_id: user.id, is_private: listForm.isPrivate, list_type: actualListType
         });
         setLoading(false);
-        if (!error) { setListForm({ name: '', isPrivate: false, listType: 'shopping' }); onOpenChange(false); onSuccess(); }
+        if (!error) {
+            setListForm({ name: '', isPrivate: false, listType: 'shopping' });
+            onOpenChange(false);
+            onSuccess();
+            toast.success(mode === 'wishlist' ? "Wishlist created!" : "List created!");
+        } else {
+            toast.error(error.message);
+        }
     };
 
     const renderMenu = () => (
@@ -256,7 +245,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     const [selectedList, setSelectedList] = useState<List | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: string } | null>(null)
-    const [showExplainer, setShowExplainer] = useState(false); // Manually triggered explainer dialog
+    const [showExplainer, setShowExplainer] = useState(false);
 
     useEffect(() => { onListSelected(!!selectedList) }, [selectedList, onListSelected])
 
@@ -315,6 +304,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
         await supabase.from('lists').delete().eq('id', deleteConfirm.id);
         setLists(lists.filter(l => l.id !== deleteConfirm.id));
         setDeleteConfirm(null);
+        toast.success("List deleted.");
     }
 
     const handleBack = () => {
@@ -374,18 +364,34 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     return (
         <div className="space-y-6">
 
-            {/* ⚡ Header & Explainer Access */}
+            {/* ⚡ FIXED: Moved Explainer Button to Flex Container */}
             {lists.length > 0 && (
-                <div className="flex justify-end -mb-4">
-                    <Button variant="ghost" size="sm" onClick={() => setShowExplainer(true)} className="text-slate-400 hover:text-indigo-600 h-6 px-2 text-[10px] uppercase font-bold gap-1">
+                <div className="flex justify-end mb-2">
+                    <Button variant="ghost" size="sm" onClick={() => setShowExplainer(true)} className="text-slate-400 hover:text-slate-600 h-6 px-2 text-[10px] uppercase font-bold gap-1 bg-slate-50 border border-slate-100 rounded-lg">
                         <Info className="w-3 h-3" /> How it works
                     </Button>
                 </div>
             )}
 
-            {/* ⚡ Content with Loading State */}
+            {/* ⚡ OPTION C: Skeletons for Loading */}
             {isLoading ? (
-                <div className="flex justify-center py-10"><Loader2 className="w-8 h-8 animate-spin text-slate-300" /></div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {[1, 2, 3, 4].map(i => (
+                        <div key={i} className="bg-white border border-slate-200 rounded-2xl p-5">
+                            <div className="flex items-center gap-3 mb-3">
+                                <Skeleton className="h-10 w-10 rounded-xl" />
+                                <div className="flex-1 space-y-2">
+                                    <Skeleton className="h-4 w-3/4" />
+                                    <Skeleton className="h-3 w-1/2" />
+                                </div>
+                            </div>
+                            <div className="border-t border-slate-50 pt-2 space-y-2">
+                                <Skeleton className="h-3 w-full" />
+                                <Skeleton className="h-3 w-2/3" />
+                            </div>
+                        </div>
+                    ))}
+                </div>
             ) : (
                 <>
                     {lists.length === 0 && (
@@ -410,25 +416,25 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                    {/* ⚡ UPDATED: Lime Cards for Wishlist Summary */}
+                                    {/* ⚡ UPDATED: Wishlist Summary now uses Lime Theme to match lists */}
                                     <Card className="rounded-2xl shadow-sm border border-lime-100 p-4 bg-lime-50/50 hover:bg-lime-100/50">
-                                        <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-600 uppercase tracking-wider flex items-center gap-1"><Goal className="w-3 h-3" /> All Goals</CardTitle></CardHeader>
+                                        <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-700 uppercase tracking-wider flex items-center gap-1"><Goal className="w-3 h-3" /> All Goals</CardTitle></CardHeader>
                                         <CardContent className="p-0">
-                                            <div className="text-2xl font-bold text-lime-800">{grandTotalGoals.toLocaleString()}</div>
-                                            <p className="text-[10px] text-lime-600 font-medium mt-0.5">({grandTotalUncompletedGoals} Active, {grandTotalCompletedGoals} Done)</p>
+                                            <div className="text-2xl font-bold text-lime-900">{grandTotalGoals.toLocaleString()}</div>
+                                            <p className="text-[10px] text-lime-700 font-medium mt-0.5">({grandTotalUncompletedGoals} Active, {grandTotalCompletedGoals} Done)</p>
                                         </CardContent>
                                     </Card>
                                     <Card className="rounded-2xl shadow-sm border border-lime-100 p-4 bg-lime-50/50 hover:bg-lime-100/50">
-                                        <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-600 uppercase tracking-wider flex items-center gap-1"><PiggyBank className="w-3 h-3" /> Total Saved</CardTitle></CardHeader>
-                                        <CardContent className="p-0"><div className="text-2xl font-bold text-lime-700 truncate">{currencySymbol}{grandTotalSaved.toLocaleString()}</div></CardContent>
+                                        <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-700 uppercase tracking-wider flex items-center gap-1"><PiggyBank className="w-3 h-3" /> Total Saved</CardTitle></CardHeader>
+                                        <CardContent className="p-0"><div className="text-2xl font-bold text-lime-800 truncate">{currencySymbol}{grandTotalSaved.toLocaleString()}</div></CardContent>
                                     </Card>
                                     <Card className="col-span-2 rounded-2xl shadow-sm border border-lime-100 px-4 py-3 bg-lime-50/50 hover:bg-lime-100/50 flex flex-col justify-center">
                                         <div className="flex justify-between items-center mb-1.5">
-                                            <CardTitle className="text-[10px] font-bold text-lime-600 uppercase tracking-wider">Overall Progress</CardTitle>
+                                            <CardTitle className="text-[10px] font-bold text-lime-700 uppercase tracking-wider">Overall Progress</CardTitle>
                                             <span className="text-[10px] text-slate-500 font-medium">Target: {currencySymbol}{grandTotalTarget.toLocaleString()}</span>
                                         </div>
                                         <div className="flex items-center gap-3">
-                                            <Progress value={progress} className="h-2 bg-lime-100 flex-1" indicatorClassName="bg-lime-500" />
+                                            <Progress value={progress} className="h-2 bg-white flex-1" indicatorClassName="bg-lime-500" />
                                             <span className="text-lg font-bold text-lime-800">{Math.round(progress)}%</span>
                                         </div>
                                     </Card>
@@ -439,7 +445,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
                             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                                 {lists.map(list => (
-                                    <div key={list.id} onClick={() => setSelectedList(list)} className={`group relative cursor-pointer bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-lg transition-all ${listType === 'wishlist' ? 'hover:border-lime-200' : 'hover:border-blue-200'}`}>
+                                    <div key={list.id} onClick={() => setSelectedList(list)} className={`group relative cursor-pointer bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-lg transition-all ${listType === 'wishlist' ? 'hover:border-lime-300' : 'hover:border-lime-300'}`}>
                                         <div className="flex items-center gap-3 mb-3">
                                             <div className={`p-2 rounded-xl ${listType === 'wishlist' ? 'bg-lime-50 text-lime-600' : 'bg-lime-50 text-lime-600'}`}>
                                                 {getListIcon(list)}
@@ -501,7 +507,7 @@ function EditListDialog({ list, onListUpdated }: { list: List, onListUpdated: (l
     const [isOpen, setIsOpen] = useState(false)
     const [name, setName] = useState(list.name)
     const [isPrivate, setIsPrivate] = useState(list.is_private)
-    const handleSubmit = async (e: FormEvent) => { e.preventDefault(); const { data, error } = await supabase.from("lists").update({ name, is_private: isPrivate }).eq("id", list.id).select().single(); if (error) alert(error.message); else { onListUpdated(data as List); setIsOpen(false); } }
+    const handleSubmit = async (e: FormEvent) => { e.preventDefault(); const { data, error } = await supabase.from("lists").update({ name, is_private: isPrivate }).eq("id", list.id).select().single(); if (error) toast.error(error.message); else { onListUpdated(data as List); setIsOpen(false); toast.success("List saved"); } }
     return (
         <Dialog open={isOpen} onOpenChange={setIsOpen}><DialogTrigger asChild><Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100"><Pencil className="w-4 h-4 text-slate-400" /></Button></DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit List</DialogTitle></DialogHeader><form onSubmit={handleSubmit} className="space-y-5 pt-2"><div><Label>List Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5 h-11" /></div><div className="space-y-2"><Label>Visibility</Label><div className="flex gap-3 pt-1"><Button type="button" onClick={() => setIsPrivate(false)} className={`flex-1 ${!isPrivate ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Shared</Button><Button type="button" onClick={() => setIsPrivate(true)} className={`flex-1 ${isPrivate ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Private</Button></div></div><DialogFooter><Button type="submit" className="w-full h-11 bg-slate-900">Save Changes</Button></DialogFooter></form></DialogContent></Dialog>
     )
@@ -570,8 +576,16 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         if (savedExplainers) setDismissedExplainers(JSON.parse(savedExplainers));
 
         async function fetchData() {
+            // ⚡ OPTIMIZED: Cache Member Count for Instant Load
+            const cacheKey = CACHE_KEYS.MEMBER_COUNT(household.id);
+            const cachedCount = loadFromCache<number>(cacheKey);
+            if (cachedCount !== null) setMemberCount(cachedCount);
+
             const { count } = await supabase.from('household_members').select('*', { count: 'exact', head: true }).eq('household_id', household.id);
-            if (count !== null) setMemberCount(count);
+            if (count !== null) {
+                setMemberCount(count);
+                saveToCache(cacheKey, count);
+            }
         }
         fetchData();
 
@@ -620,9 +634,20 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                                 {hideBalances ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </Button>
 
-                            <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-lime-500 text-slate-900 rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-lime-600">
-                                <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Sync
-                            </Button>
+                            {/* ⚡ UPDATED: Responsive Sync/Settings Button Logic */}
+                            {memberCount <= 1 ? (
+                                // Case 1: Solo User (Show Sync)
+                                <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-lime-500 text-slate-900 rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-lime-600">
+                                    <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Sync
+                                </Button>
+                            ) : (
+                                // Case 2: Household > 1 (Hide Sync on Desktop, Show Settings on Mobile)
+                                <div className="md:hidden">
+                                    <Button onClick={() => setActiveTab('settings')} size="icon" className="bg-lime-500 text-slate-900 rounded-full h-8 w-8 shadow-sm hover:bg-lime-600 p-0 flex items-center justify-center">
+                                        <Settings className="w-4 h-4" />
+                                    </Button>
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -735,6 +760,8 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     onJoinSuccess={() => window.location.reload()}
                 />
             </div>
+            {/* ⚡ FINAL: TOASTER COMPONENT PLACED HERE */}
+            <Toaster position="bottom-center" />
         </SidebarLayout>
     )
 }

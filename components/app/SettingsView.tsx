@@ -6,13 +6,10 @@ import { User } from "@supabase/supabase-js"
 import { Household } from "@/lib/types"
 
 // UI Imports
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
@@ -20,41 +17,18 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 // Icons & Utils
 import {
     Camera, LogOut, Loader2, UserMinus, Shield, AlertTriangle, Home,
-    User as UserIcon, Smartphone, Moon, Mail, Key, Pencil,
-    HelpCircle, Users, CloudOff, RefreshCw, Star, Share2, Lock, Check, X,
-    ChevronRight, Globe, MessageCircle, CreditCard, MapPin, Bell, Sparkles
+    User as UserIcon, Smartphone, Moon, Pencil,
+    Share2, Check,
+    ChevronRight, Globe, MessageCircle, CreditCard, MapPin, Building2, CloudOff, Star
 } from "lucide-react"
 import { COUNTRIES, CURRENCIES } from "@/lib/constants"
 import { Capacitor } from "@capacitor/core"
 import { App as CapApp } from "@capacitor/app"
 import { Share } from '@capacitor/share'
-import { PushNotifications } from "@capacitor/push-notifications"
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
 import { clearCache, getCacheSize } from "@/lib/offline"
-
-// --- HELPER: Image Compression ---
-const compressImage = (file: File): Promise<Blob> => {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            if (!ctx) { reject(new Error("Canvas not supported")); return; }
-            const MAX_SIZE = 800;
-            let width = img.width; let height = img.height;
-            if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } }
-            else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
-            canvas.width = width; canvas.height = height;
-            ctx.drawImage(img, 0, 0, width, height);
-            canvas.toBlob((blob) => {
-                if (!blob) { reject(new Error("Compression failed")); return; }
-                resolve(blob);
-            }, 'image/jpeg', 0.7);
-        };
-        img.onerror = (error) => reject(error);
-    });
-}
+import { compressImage } from "@/lib/utils"
+import toast from 'react-hot-toast' // ⚡ SIMPLE IMPORT
 
 // --- COMPONENT: Grid Currency Selector ---
 function CurrencySelector({ value, onSelect, disabled }: { value: string, onSelect: (c: string) => void, disabled: boolean }) {
@@ -73,7 +47,7 @@ function CurrencySelector({ value, onSelect, disabled }: { value: string, onSele
                     </div>
                     <div>
                         <p className="text-sm font-bold text-slate-800">Currency</p>
-                        <p className="text-xs text-slate-500">{selectedCurrency.name} ({selectedCurrency.symbol})</p>
+                        <p className="text-[10px] text-slate-500 font-medium">{selectedCurrency.name} ({selectedCurrency.symbol})</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -121,7 +95,7 @@ function CountrySelector({ value, onSelect, disabled }: { value: string, onSelec
                     </div>
                     <div>
                         <p className="text-sm font-bold text-slate-800">Country</p>
-                        <p className="text-xs text-slate-500">Region settings</p>
+                        <p className="text-[10px] text-slate-500 font-medium">Region settings</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -234,7 +208,8 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
             setAvatarUrl(data.publicUrl);
             triggerNotificationHaptic(NotificationType.Success);
             onSettingsChange();
-        } catch (err: any) { alert(err.message); } finally { setUploading(false); }
+            toast.success("Profile photo updated!");
+        } catch (err: any) { toast.error(err.message); } finally { setUploading(false); }
     };
 
     const handleHouseholdImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -250,15 +225,20 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
             setHhForm(prev => ({ ...prev, avatar_url: data.publicUrl }));
             triggerNotificationHaptic(NotificationType.Success);
             onSettingsChange();
-        } catch (err: any) { alert(err.message); } finally { setUploading(false); }
+            toast.success("Household logo updated!");
+        } catch (err: any) { toast.error(err.message); } finally { setUploading(false); }
     };
 
     const handleSaveProfile = async () => {
         setLoading(true); triggerHaptic(ImpactStyle.Medium);
         const { error } = await supabase.auth.updateUser({ data: { full_name: name } });
         setLoading(false);
-        if (error) alert(error.message);
-        else { triggerNotificationHaptic(NotificationType.Success); onSettingsChange(); }
+        if (error) toast.error(error.message);
+        else {
+            triggerNotificationHaptic(NotificationType.Success);
+            onSettingsChange();
+            toast.success("Profile saved!");
+        }
     }
 
     const handleSaveHousehold = async () => {
@@ -266,33 +246,47 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
         setLoading(true); triggerHaptic(ImpactStyle.Medium);
         const { error } = await supabase.from('households').update({ name: hhForm.name, country: hhForm.country, currency: hhForm.currency }).eq('id', household.id);
         setLoading(false);
-        if (error) alert(error.message);
-        else { triggerNotificationHaptic(NotificationType.Success); onSettingsChange(); }
+        if (error) toast.error(error.message);
+        else {
+            triggerNotificationHaptic(NotificationType.Success);
+            onSettingsChange();
+            toast.success("Household details saved!");
+        }
     }
 
     const handleCopyInvite = async () => {
         const inviteLink = `https://listner.site/join/${household.invite_code}`;
-        if (Capacitor.isNativePlatform()) { await Share.share({ title: 'Join my Household on ListNer', text: `Join my household using this code: ${household.invite_code} or click: `, url: inviteLink }); }
-        else { await navigator.clipboard.writeText(inviteLink); alert("Invite link copied!"); }
+        if (Capacitor.isNativePlatform()) {
+            await Share.share({ title: 'Join my Household on ListNer', text: `Join my household using this code: ${household.invite_code} or click: `, url: inviteLink });
+        } else {
+            await navigator.clipboard.writeText(inviteLink);
+            toast.success("Invite link copied!");
+        }
     }
 
     const triggerVerification = (type: 'leave' | 'delete') => {
         triggerHaptic(ImpactStyle.Medium);
         if (type === 'leave' && amIAdmin && members.length === 1) { setVerifyType('delete'); setVerifyOpen(true); return; }
-        if (type === 'leave' && amIAdmin && members.length > 1) return alert("Owner cannot leave. Transfer ownership or delete household.");
+        if (type === 'leave' && amIAdmin && members.length > 1) {
+            toast.error("Owner cannot leave. Transfer ownership or delete household.");
+            return;
+        }
         setVerifyType(type); setVerifyInput(""); setVerifyOpen(true);
     }
 
     const handleVerifiedAction = async () => {
         const requiredText = verifyType === 'leave' ? 'LEAVE' : household.name;
-        if (verifyInput !== requiredText) return alert("Verification failed.");
+        if (verifyInput !== requiredText) {
+            toast.error("Verification failed.");
+            return;
+        }
         setLoading(true); triggerHaptic(ImpactStyle.Heavy);
         if (verifyType === 'leave') {
             const { error } = await supabase.from('household_members').delete().eq('user_id', user.id).eq('household_id', household.id);
-            if (!error) window.location.reload(); else alert(error.message);
+            if (!error) window.location.reload(); else toast.error(error.message);
         } else {
             const { error } = await supabase.from('households').delete().eq('id', household.id);
-            if (!error) window.location.reload(); else alert(error.message);
+            if (!error) window.location.reload(); else toast.error(error.message);
         }
         setLoading(false);
     }
@@ -301,14 +295,29 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
         if (!removeMemberId) return; triggerHaptic(ImpactStyle.Medium);
         const { error } = await supabase.from('household_members').delete().eq('user_id', removeMemberId).eq('household_id', household.id);
         setRemoveMemberId(null);
-        if (!error) { setMembers(members.filter(m => m.id !== removeMemberId)); triggerNotificationHaptic(NotificationType.Success); }
-        else { alert(error.message); }
+        if (!error) {
+            setMembers(members.filter(m => m.id !== removeMemberId));
+            triggerNotificationHaptic(NotificationType.Success);
+            toast.success("Member removed.");
+        } else {
+            toast.error(error.message);
+        }
     }
 
-    const handleClearCache = async () => { triggerHaptic(ImpactStyle.Medium); await clearCache(); setCacheSize("0 KB"); alert("Cache cleared."); }
-    const handleRateApp = async (stars: number) => { setRating(stars); triggerHaptic(ImpactStyle.Medium); const { error } = await supabase.from('app_ratings').upsert({ user_id: user.id, rating: stars, updated_at: new Date().toISOString() }, { onConflict: 'user_id' }); }
+    const handleClearCache = async () => {
+        triggerHaptic(ImpactStyle.Medium);
+        await clearCache();
+        setCacheSize("0 KB");
+        toast.success("Cache cleared.");
+    }
 
-    // ⚡ BEAUTIFIED & BRANDED SHARE (Lime)
+    const handleRateApp = async (stars: number) => {
+        setRating(stars);
+        triggerHaptic(ImpactStyle.Medium);
+        await supabase.from('app_ratings').upsert({ user_id: user.id, rating: stars, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+        toast.success("Thank you for rating!");
+    }
+
     const handleShareApp = async () => {
         triggerHaptic(ImpactStyle.Medium);
         const url = 'https://listner.site/';
@@ -319,7 +328,7 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
             await navigator.share({ title: 'ListNer', text: msg, url });
         } else {
             await navigator.clipboard.writeText(`${msg} ${url}`);
-            alert("Link copied!");
+            toast.success("Link copied!");
         }
     }
 
@@ -327,27 +336,27 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
         <div className="max-w-2xl mx-auto pb-24 animate-in fade-in slide-in-from-bottom-2 duration-500">
             <Tabs defaultValue="profile" className="w-full">
 
-                {/* --- 1. TAB HEADER (Consistent Design) --- */}
+                {/* --- 1. TAB HEADER --- */}
                 <TabsList className="grid w-full grid-cols-3 mb-6 bg-slate-100 p-1 rounded-2xl h-12">
                     <TabsTrigger value="profile" onClick={() => triggerHaptic()} className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm font-bold text-xs"><UserIcon className="w-4 h-4 mr-2" /> Profile</TabsTrigger>
                     <TabsTrigger value="household" onClick={() => triggerHaptic()} className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm font-bold text-xs"><Home className="w-4 h-4 mr-2" /> Household</TabsTrigger>
                     <TabsTrigger value="app" onClick={() => triggerHaptic()} className="rounded-xl data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm font-bold text-xs"><Smartphone className="w-4 h-4 mr-2" /> App</TabsTrigger>
                 </TabsList>
 
-                {/* --- 2. PROFILE TAB (Clean White) --- */}
+                {/* --- 2. PROFILE TAB --- */}
                 <TabsContent value="profile" className="space-y-6">
                     <div className="bg-white rounded-3xl p-8 flex flex-col items-center shadow-sm border border-slate-100 text-center">
                         <div className="relative group cursor-pointer mb-4" onClick={() => userFileRef.current?.click()}>
-                            <div className="h-24 w-24 rounded-full bg-slate-50 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center">
+                            <div className="h-24 w-24 rounded-full bg-slate-50 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center relative">
                                 {avatarUrl ? <img src={avatarUrl} className="w-full h-full object-cover" alt="Profile" /> : <div className="w-full h-full flex items-center justify-center bg-slate-100 text-3xl font-bold text-slate-400">{name?.[0]}</div>}
                                 {uploading && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><Loader2 className="w-6 h-6 text-white animate-spin" /></div>}
                             </div>
-                            <div className="absolute bottom-0 right-0 bg-slate-900 text-white p-2 rounded-full border-4 border-white shadow-sm"><Camera className="w-3.5 h-3.5" /></div>
+                            <div className="absolute bottom-0 right-0 bg-slate-900 text-white p-2 rounded-full border-4 border-white shadow-sm transition-transform active:scale-95"><Camera className="w-3.5 h-3.5" /></div>
                             <input type="file" ref={userFileRef} hidden accept="image/*" onChange={handleUserImageUpload} />
                         </div>
                         <h2 className="text-xl font-bold text-slate-900">{name || "User"}</h2>
                         <p className="text-xs text-slate-400 font-medium mb-3">{user.email}</p>
-                        <Badge variant="secondary" className="bg-lime-100 text-lime-700 hover:bg-lime-100 border-none font-medium">Member since {joinedDate.split(' ')[2]}</Badge>
+                        <Badge variant="secondary" className="bg-lime-100 text-lime-800 hover:bg-lime-100 border-none font-medium px-3 py-1">Member since {joinedDate.split(' ')[2]}</Badge>
                     </div>
 
                     <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 space-y-4">
@@ -363,45 +372,65 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
                     </Button>
                 </TabsContent>
 
-                {/* --- 3. HOUSEHOLD TAB (Consistent) --- */}
+                {/* --- 3. HOUSEHOLD TAB --- */}
                 <TabsContent value="household" className="space-y-6">
-                    <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden divide-y divide-slate-50">
-                        {/* Name */}
-                        <div className="p-4 flex items-center justify-between">
-                            <div className="flex items-center gap-4">
-                                <div className="h-10 w-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400"><Home className="w-5 h-5" /></div>
-                                <div><p className="text-sm font-bold text-slate-800">Name</p><p className="text-xs text-slate-500">{household.name}</p></div>
+                    {/* Consistent Design: Card 1 (Avatar & Name) */}
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 text-center">
+                        <div className="relative group cursor-pointer mb-6 mx-auto w-fit" onClick={() => amIAdmin && householdFileRef.current?.click()}>
+                            <div className="h-24 w-24 rounded-3xl bg-slate-50 border-4 border-white shadow-lg overflow-hidden flex items-center justify-center relative rotate-3 hover:rotate-0 transition-all duration-300">
+                                {hhForm.avatar_url ? <img src={hhForm.avatar_url} className="w-full h-full object-cover" alt="Household" /> : <Building2 className="w-10 h-10 text-slate-300" />}
+                                {uploading && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><Loader2 className="w-6 h-6 text-white animate-spin" /></div>}
                             </div>
-                            {amIAdmin && <div className="relative cursor-pointer" onClick={() => householdFileRef.current?.click()}><Pencil className="w-4 h-4 text-slate-300" /><input type="file" ref={householdFileRef} hidden accept="image/*" onChange={handleHouseholdImageUpload} /></div>}
+                            {amIAdmin && (
+                                <div className="absolute -bottom-2 -right-2 bg-slate-900 text-white p-2 rounded-full border-4 border-white shadow-sm transition-transform active:scale-95">
+                                    <Pencil className="w-3.5 h-3.5" />
+                                </div>
+                            )}
+                            <input type="file" ref={householdFileRef} hidden accept="image/*" onChange={handleHouseholdImageUpload} />
                         </div>
 
-                        {/* Selectors */}
+                        <div className="space-y-1 mb-4">
+                            <Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Household Name</Label>
+                            <Input
+                                value={hhForm.name}
+                                onChange={e => setHhForm({ ...hhForm, name: e.target.value })}
+                                disabled={!amIAdmin}
+                                className="h-12 rounded-xl bg-slate-50 border-slate-200 text-center font-bold text-slate-900 focus:bg-white transition-all"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Card 2: Settings */}
+                    <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden divide-y divide-slate-50">
                         <CurrencySelector value={hhForm.currency} onSelect={c => setHhForm({ ...hhForm, currency: c })} disabled={!amIAdmin} />
                         <CountrySelector value={hhForm.country} onSelect={c => setHhForm({ ...hhForm, country: c })} disabled={!amIAdmin} />
 
                         {amIAdmin && (
                             <div className="p-3 bg-slate-50/50">
-                                <Button onClick={handleSaveHousehold} disabled={loading} size="sm" className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold">Update Details</Button>
+                                <Button onClick={handleSaveHousehold} disabled={loading} size="sm" className="w-full bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold h-11">
+                                    {loading ? 'Saving...' : 'Update Details'}
+                                </Button>
                             </div>
                         )}
                     </div>
 
+                    {/* Card 3: Members */}
                     <div>
                         <div className="flex items-center justify-between px-2 mb-2">
                             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">Members</h3>
-                            {amIAdmin && <button onClick={handleCopyInvite} className="text-xs font-bold text-lime-600 flex items-center gap-1"><Share2 className="w-3 h-3" /> Invite</button>}
+                            {amIAdmin && <button onClick={handleCopyInvite} className="text-xs font-bold text-lime-600 bg-lime-50 px-2 py-1 rounded-lg flex items-center gap-1 active:scale-95 transition-transform"><Share2 className="w-3 h-3" /> Invite Code</button>}
                         </div>
                         <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden divide-y divide-slate-50">
                             {members.map((m) => (
                                 <div key={m.id} className="p-4 flex items-center justify-between">
                                     <div className="flex items-center gap-3">
-                                        <div className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-xs">{m.name?.[0]}</div>
-                                        <div><p className="text-sm font-bold text-slate-800">{m.name}</p><p className="text-[10px] text-slate-400">{m.is_owner ? 'Admin' : 'Member'}</p></div>
+                                        <div className="h-9 w-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-500 text-xs border border-slate-200">{m.name?.[0]}</div>
+                                        <div><p className="text-sm font-bold text-slate-800">{m.name}</p><p className="text-[10px] text-slate-400 font-medium">{m.is_owner ? 'Admin' : 'Member'}</p></div>
                                     </div>
                                     <div className="flex items-center gap-2">
                                         {m.is_owner && <Shield className="w-4 h-4 text-lime-500 fill-lime-100" />}
                                         {amIAdmin && m.id !== user.id && (
-                                            <button onClick={() => setRemoveMemberId(m.id)} className="p-2 text-rose-400 hover:bg-rose-50 rounded-full"><UserMinus className="w-4 h-4" /></button>
+                                            <button onClick={() => setRemoveMemberId(m.id)} className="p-2 text-rose-400 hover:bg-rose-50 rounded-full transition-colors"><UserMinus className="w-4 h-4" /></button>
                                         )}
                                     </div>
                                 </div>
@@ -412,28 +441,28 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
                     <div className="space-y-2 pt-4">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-2">Danger Zone</h3>
                         <div className="bg-rose-50/50 rounded-3xl border border-rose-100 overflow-hidden divide-y divide-rose-100">
-                            <button onClick={() => triggerVerification('leave')} className="w-full p-4 flex items-center justify-between hover:bg-rose-100/50 transition-colors text-left">
-                                <div><p className="text-sm font-bold text-rose-700">Leave Household</p><p className="text-xs text-rose-500">Sign out of this space.</p></div>
-                                <LogOut className="w-5 h-5 text-rose-400" />
+                            <button onClick={() => triggerVerification('leave')} className="w-full p-4 flex items-center justify-between hover:bg-rose-100/50 transition-colors text-left group">
+                                <div><p className="text-sm font-bold text-rose-700 group-hover:text-rose-800">Leave Household</p><p className="text-xs text-rose-500">Sign out of this space.</p></div>
+                                <LogOut className="w-5 h-5 text-rose-400 group-hover:text-rose-600 transition-colors" />
                             </button>
                             {amIAdmin && (
-                                <button onClick={() => triggerVerification('delete')} className="w-full p-4 flex items-center justify-between hover:bg-rose-100/50 transition-colors text-left">
-                                    <div><p className="text-sm font-bold text-rose-700">Delete Household</p><p className="text-xs text-rose-500">Permanently remove all data.</p></div>
-                                    <AlertTriangle className="w-5 h-5 text-rose-400" />
+                                <button onClick={() => triggerVerification('delete')} className="w-full p-4 flex items-center justify-between hover:bg-rose-100/50 transition-colors text-left group">
+                                    <div><p className="text-sm font-bold text-rose-700 group-hover:text-rose-800">Delete Household</p><p className="text-xs text-rose-500">Permanently remove all data.</p></div>
+                                    <AlertTriangle className="w-5 h-5 text-rose-400 group-hover:text-rose-600 transition-colors" />
                                 </button>
                             )}
                         </div>
                     </div>
                 </TabsContent>
 
-                {/* --- 4. APP TAB (Consistent) --- */}
+                {/* --- 4. APP TAB --- */}
                 <TabsContent value="app" className="space-y-6">
                     <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden divide-y divide-slate-50">
                         {/* Dark Mode */}
                         <div className="p-4 flex items-center justify-between opacity-60">
                             <div className="flex items-center gap-4">
                                 <div className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-500"><Moon className="w-5 h-5" /></div>
-                                <div><p className="text-sm font-bold text-slate-800">Dark Mode</p><p className="text-xs text-slate-500">Coming Soon</p></div>
+                                <div><p className="text-sm font-bold text-slate-800">Dark Mode</p><p className="text-[10px] text-slate-500 font-medium">Coming Soon</p></div>
                             </div>
                             <Switch disabled checked={false} />
                         </div>
@@ -441,19 +470,19 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
                         <div className="p-4 flex items-center justify-between">
                             <div className="flex items-center gap-4">
                                 <div className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-500"><CloudOff className="w-5 h-5" /></div>
-                                <div><p className="text-sm font-bold text-slate-800">Offline Data</p><p className="text-xs text-slate-500">{cacheSize}</p></div>
+                                <div><p className="text-sm font-bold text-slate-800">Offline Data</p><p className="text-[10px] text-slate-500 font-medium">{cacheSize} cached</p></div>
                             </div>
-                            <Button size="sm" variant="ghost" onClick={handleClearCache} className="text-xs h-8 font-bold text-slate-600">Clear</Button>
+                            <Button size="sm" variant="ghost" onClick={handleClearCache} className="text-xs h-8 font-bold text-slate-600 bg-slate-50 hover:bg-slate-100">Clear</Button>
                         </div>
                     </div>
 
-                    {/* Share Button (Lime) */}
+                    {/* Share Button (Lime Theme) */}
                     <button
                         onClick={handleShareApp}
-                        className="w-full p-4 rounded-3xl shadow-lg shadow-lime-100 bg-lime-500 text-slate-900 flex items-center justify-between group active:scale-[0.98] transition-all"
+                        className="w-full p-4 rounded-3xl shadow-lg shadow-lime-100/50 bg-lime-500 text-slate-900 flex items-center justify-between group active:scale-[0.98] transition-all"
                     >
                         <div className="flex items-center gap-4">
-                            <div className="p-2 bg-white/30 rounded-xl backdrop-blur-sm"><Share2 className="w-5 h-5" /></div>
+                            <div className="p-2 bg-white/30 rounded-xl backdrop-blur-sm text-slate-900"><Share2 className="w-5 h-5" /></div>
                             <div className="text-left">
                                 <span className="block text-sm font-bold">Share App</span>
                                 <span className="block text-[10px] opacity-70 font-medium">Invite friends to ListNer</span>
@@ -468,7 +497,7 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
                         <div className="p-4 flex flex-col gap-3">
                             <div className="flex items-center gap-4">
                                 <div className="h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center text-amber-500"><Star className="w-5 h-5" /></div>
-                                <div><p className="text-sm font-bold text-slate-800">Rate Us</p><p className="text-xs text-slate-500">Love the app?</p></div>
+                                <div><p className="text-sm font-bold text-slate-800">Rate Us</p><p className="text-[10px] text-slate-500 font-medium">Love the app?</p></div>
                             </div>
                             <div className="flex justify-between px-2 pt-1">
                                 {[1, 2, 3, 4, 5].map((star) => (
@@ -480,7 +509,7 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
                         <a href="https://listner.site" target="_blank" rel="noreferrer" className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
                             <div className="flex items-center gap-4">
                                 <div className="h-10 w-10 rounded-xl bg-cyan-50 flex items-center justify-center text-cyan-600"><Globe className="w-5 h-5" /></div>
-                                <div><p className="text-sm font-bold text-slate-800">Visit Website</p><p className="text-xs text-slate-500">Listner.site</p></div>
+                                <div><p className="text-sm font-bold text-slate-800">Visit Website</p><p className="text-[10px] text-slate-500 font-medium">Listner.site</p></div>
                             </div>
                             <ChevronRight className="w-4 h-4 text-slate-300" />
                         </a>
@@ -488,7 +517,7 @@ export function SettingsView({ user, household, onSettingsChange }: { user: User
                         <a href="mailto:aliyuiliyasu15@hotmail.com?subject=ListNer%20Support" className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors">
                             <div className="flex items-center gap-4">
                                 <div className="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center text-blue-600"><MessageCircle className="w-5 h-5" /></div>
-                                <div><p className="text-sm font-bold text-slate-800">Contact Support</p><p className="text-xs text-slate-500">Get help</p></div>
+                                <div><p className="text-sm font-bold text-slate-800">Contact Support</p><p className="text-[10px] text-slate-500 font-medium">Get help</p></div>
                             </div>
                             <ChevronRight className="w-4 h-4 text-slate-300" />
                         </a>

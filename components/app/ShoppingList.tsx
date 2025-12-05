@@ -26,6 +26,7 @@ import { Progress } from "@/components/ui/progress"
 import { Capacitor } from "@capacitor/core"
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
 import { Virtuoso } from 'react-virtuoso'
+import toast, { Toaster } from 'react-hot-toast' // ⚡ SIMPLE TOAST IMPORT
 
 type ShoppingItem = {
     id: number; created_at: string; name: string; quantity: string | null;
@@ -95,9 +96,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const [listSettings, setListSettings] = useState({ name: list.name, isPrivate: list.is_private })
     const [form, setForm] = useState({ name: "", quantity: "1", price: "", notes: "", priority: "Medium" })
 
-    const LIMIT = 50;
     const [visibleCount, setVisibleCount] = useState(20);
-
     const inputRef = useRef<HTMLInputElement>(null)
 
     const isOwner = user.id === list.owner_id;
@@ -115,29 +114,32 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         }
     }
 
+    // ⚡ OPTIMIZED DATA LOADING
     useEffect(() => {
-        async function getItems() {
-            const cacheKey = CACHE_KEYS.SHOPPING_LIST(list.id);
-            const cachedData = loadFromCache<ShoppingItem[]>(cacheKey);
+        let isMounted = true;
+        const cacheKey = CACHE_KEYS.SHOPPING_LIST(list.id);
 
-            if (cachedData) {
+        const loadData = async () => {
+            const cachedData = loadFromCache<ShoppingItem[]>(cacheKey);
+            if (cachedData && isMounted) {
                 setItems(cachedData);
                 setUsingCachedData(true);
                 setIsLoading(false);
-            } else {
+            } else if (isMounted) {
                 setIsLoading(true);
             }
 
             const { data, error } = await supabase.from("shopping_items").select("*").eq("list_id", list.id);
 
-            if (!error && data) {
+            if (!error && data && isMounted) {
                 setItems(data as ShoppingItem[]);
                 saveToCache(cacheKey, data);
                 setUsingCachedData(false);
+                setIsLoading(false);
             }
-            setIsLoading(false);
-        }
-        getItems()
+        };
+
+        loadData();
 
         const channel = supabase.channel(`shopping_${list.id}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items', filter: `list_id=eq.${list.id}` }, (payload) => {
@@ -147,7 +149,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             })
             .subscribe()
 
-        return () => { supabase.removeChannel(channel) }
+        return () => { isMounted = false; supabase.removeChannel(channel) }
     }, [list.id])
 
     const handleFormChange = (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [e.target.name]: e.target.value });
@@ -157,7 +159,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         const text = items.map(i => `- ${i.name}`).join('\n');
         navigator.clipboard.writeText(text);
         triggerHaptic(ImpactStyle.Medium);
-        showAlert("Success", "List copied to clipboard!");
+        toast.success("List copied to clipboard.");
     };
 
     const handleDownloadTxt = () => {
@@ -179,13 +181,19 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
     const handleRenameList = async () => {
         const { error } = await supabase.from('lists').update({ name: listSettings.name }).eq('id', list.id);
-        if (!error) { setIsRenameOpen(false); }
+        if (!error) {
+            setIsRenameOpen(false);
+            toast.success("List name updated.");
+        }
     }
 
     const handleTogglePrivacy = async () => {
         const newStatus = !listSettings.isPrivate;
         const { error } = await supabase.from('lists').update({ is_private: newStatus }).eq('id', list.id);
-        if (!error) { setListSettings({ ...listSettings, isPrivate: newStatus }); showAlert("Updated", `List is now ${newStatus ? 'Private' : 'Shared'}`); }
+        if (!error) {
+            setListSettings({ ...listSettings, isPrivate: newStatus });
+            toast.success(`List is now ${newStatus ? 'Private' : 'Shared'}`);
+        }
     }
 
     const handleDelete = async () => {
@@ -196,7 +204,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             setItems(items.filter(item => item.id !== deleteConfirm.id));
 
             const { error } = await supabase.from("shopping_items").delete().eq("id", deleteConfirm.id);
-            if (error) setItems(oldItems);
+            if (error) { setItems(oldItems); toast.error("Failed to delete."); }
 
         } else if (deleteConfirm.type === 'list') {
             await supabase.from('lists').delete().eq('id', list.id);
@@ -208,7 +216,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             setSelectedItems([]);
 
             const { error } = await supabase.from("shopping_items").delete().in("id", toDelete);
-            if (error) setItems(oldItems);
+            if (error) { setItems(oldItems); toast.error("Failed to delete."); }
 
         } else if (deleteConfirm.type === 'completed') {
             const completedIds = items.filter(i => i.is_complete).map(i => i.id);
@@ -216,7 +224,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             setItems(items.filter(i => !i.is_complete));
 
             const { error } = await supabase.from("shopping_items").delete().in("id", completedIds);
-            if (error) setItems(oldItems);
+            if (error) { setItems(oldItems); toast.error("Failed to clear."); }
         }
         setDeleteConfirm(null);
     }
@@ -262,6 +270,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 householdId: list.household_id
             });
             triggerNotificationHaptic(NotificationType.Success);
+            toast("Offline Saved: Item saved to sync queue.", { icon: '☁️' });
         };
 
         if (navigator.onLine) {
@@ -275,6 +284,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 saveToCache(CACHE_KEYS.SHOPPING_LIST(list.id), updatedItems);
 
                 triggerNotificationHaptic(NotificationType.Success);
+                toast.success(`${form.name} added to the list.`);
             } catch (err) {
                 console.warn("Online save failed, falling back to offline mode.", err);
                 executeOfflineSave();
@@ -297,7 +307,9 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         }).eq('id', editingItem.id).select().single();
 
         if (error) {
-            showAlert("Error", "Update failed: " + error.message);
+            toast.error("Update failed.");
+        } else {
+            toast.success("Item details saved.");
         }
     }
 
@@ -319,7 +331,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         setItems(items.filter(item => item.id !== itemId));
 
         const { error } = await supabase.from("shopping_items").delete().eq("id", itemId)
-        if (error) setItems(oldItems);
+        if (error) { setItems(oldItems); toast.error("Delete failed."); }
     }
 
     const toggleSelectItem = (itemId: number) => setSelectedItems(prev => prev.includes(itemId) ? prev.filter(id => id !== itemId) : [...prev, itemId]);
@@ -362,8 +374,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const formTotal = formPrice * formQty;
 
     return (
-        <Card className={`w-full rounded-2xl shadow-xl bg-white/80 backdrop-blur-sm relative border-none min-h-[80vh] flex flex-col transition-opacity duration-500 ${usingCachedData ? 'opacity-90 grayscale-[10%]' : ''}`}>
-            {/* Header Section - Tweaked top margin so it fits closer to back button */}
+        <Card className={`w-full rounded-2xl shadow-xl bg-white/80 backdrop-blur-sm relative border-none min-h-[80vh] flex flex-col`}>
+            {/* Header Section */}
             <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
 
@@ -433,13 +445,12 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 </div>
             </div>
 
-            <CardContent className="pt-4 pb-32 flex-1 px-2 md:px-6">
+            <CardContent className="relative z-0 pt-4 pb-32 flex-1 px-2 md:px-6">
                 {isLoading ? <p className="text-center py-8 text-slate-400">Loading...</p> : (
                     <>
                         {visibleItems.length > 0 ? (
                             <Virtuoso
                                 style={{ height: '100%', minHeight: '400px' }}
-                                useWindowScroll
                                 data={visibleItems}
                                 itemContent={(index, item) => {
                                     const hasPrice = item.price && item.price > 0;

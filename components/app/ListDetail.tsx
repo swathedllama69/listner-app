@@ -16,39 +16,38 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { List, WishlistItem } from "@/lib/types"
-import { Trash2, Link as LinkIcon, DollarSign, Plus, Pencil, Settings, Globe, Lock, ListChecks, MoreHorizontal, ChevronDown, ChevronUp, CloudOff, Target, Goal, Gem, Plane } from "lucide-react"
+import { Trash2, Link as LinkIcon, Plus, Pencil, Settings, Globe, Lock, ListChecks, MoreHorizontal, ChevronDown, ChevronUp, CloudOff, Target, Goal, Gem, Plane, ArrowLeft, ShoppingBag } from "lucide-react"
 import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
 import { SyncQueue } from "@/lib/syncQueue"
 import { Capacitor } from "@capacitor/core"
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
+import toast from 'react-hot-toast' // ⚡ SIMPLE IMPORT
 
 const categories = ["Item", "Project", "Vacation", "Other"]
 const priorities = ["High", "Medium", "Low"]
 
-// --- HELPER FUNCTIONS ---
+// ⚡ RESTORED: Dynamic Priority Colors
 const getPriorityCardStyle = (p: string) => {
     switch (p) {
-        case 'High': return 'bg-rose-50 border-rose-200';
-        case 'Medium': return 'bg-amber-50/50 border-amber-100';
-        default: return 'bg-white border-slate-100';
+        case 'High': return 'border-l-4 border-l-rose-500 bg-white';
+        case 'Medium': return 'border-l-4 border-l-amber-400 bg-white';
+        default: return 'border-l-4 border-l-slate-300 bg-white';
     }
 }
 
 const getProgressColor = (percent: number) => {
     if (percent >= 100) return "bg-emerald-500";
-    if (percent >= 70) return "bg-cyan-500";
-    if (percent >= 30) return "bg-lime-500";
-    return "bg-rose-400";
+    if (percent >= 50) return "bg-lime-500";
+    return "bg-slate-400";
 };
 
-// ⚡ UPDATED: FAB to use "Add Goal" label and Teal color
 function PortalFAB({ onClick, className, icon: Icon, label }: any) {
     const [mounted, setMounted] = useState(false);
     useEffect(() => setMounted(true), []);
     if (!mounted) return null;
     return createPortal(
         <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-[100] flex items-center gap-3 animate-in zoom-in duration-300 pointer-events-none">
-            {label && <span className="bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg pointer-events-auto">{label}</span>}
+            {label && <span className="bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg pointer-events-auto">{label}</span>}
             <Button onClick={onClick} className={`${className} shadow-2xl border-4 border-white/20 active:scale-90 transition-transform pointer-events-auto`}>
                 <Icon className="w-8 h-8" />
             </Button>
@@ -79,7 +78,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [activeTab, setActiveTab] = useState("All")
     const [page, setPage] = useState(1);
     const [usingCachedData, setUsingCachedData] = useState(false);
-    const ITEMS_PER_PAGE = 5;
+    const ITEMS_PER_PAGE = 10;
 
     const [isFormOpen, setIsFormOpen] = useState(false)
     const [isContributionOpen, setIsContributionOpen] = useState(false)
@@ -97,41 +96,43 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
     const triggerHaptic = async (style: ImpactStyle = ImpactStyle.Light) => {
         if (Capacitor.isNativePlatform()) {
-            try {
-                await Haptics.impact({ style });
-            } catch (e) { }
+            try { await Haptics.impact({ style }); } catch (e) { }
         }
     };
 
     const triggerNotificationHaptic = async (type: NotificationType) => {
         if (Capacitor.isNativePlatform()) {
-            try {
-                await Haptics.notification({ type });
-            } catch (e) { }
+            try { await Haptics.notification({ type }); } catch (e) { }
         }
     }
 
     useEffect(() => {
-        async function getItems() {
-            const cacheKey = CACHE_KEYS.WISHLIST(list.id);
+        let isMounted = true;
+        const cacheKey = CACHE_KEYS.WISHLIST(list.id);
+
+        const loadData = async () => {
             const cachedData = loadFromCache<WishlistItem[]>(cacheKey);
-            if (cachedData) {
+            if (cachedData && isMounted) {
                 setItems(cachedData);
                 setUsingCachedData(true);
                 setIsLoading(false);
-            } else {
+            } else if (isMounted) {
                 setIsLoading(true);
             }
-            const { data, error } = await supabase.from("wishlist_items").select("*").eq("list_id", list.id).order("created_at", { ascending: false })
-            if (!error && data) {
+
+            const { data, error } = await supabase.from("wishlist_items").select("*").eq("list_id", list.id).order("created_at", { ascending: false });
+
+            if (!error && data && isMounted) {
                 setItems(data as WishlistItem[]);
                 saveToCache(cacheKey, data);
                 setUsingCachedData(false);
+                setIsLoading(false);
             }
-            setIsLoading(false);
-        }
-        getItems()
-    }, [list.id])
+        };
+
+        loadData();
+        return () => { isMounted = false; };
+    }, [list.id]);
 
     const activeItems = useMemo(() => {
         const filtered = items.filter(i => !i.is_complete && (activeTab === "All" ? true : i.category === activeTab));
@@ -156,6 +157,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         if (!error) {
             setListSettings(prev => ({ ...prev, name: listNameForm }));
             setIsRenameOpen(false);
+            toast.success("List renamed.");
         }
     }
 
@@ -181,46 +183,31 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             priority: form.priority
         };
 
-        const executeOfflineSave = () => {
-            const tempItem: WishlistItem = {
-                id: -Date.now(),
-                created_at: new Date().toISOString(),
-                is_complete: false,
-                ...newItemPayload
-            } as any;
+        const tempItem: WishlistItem = {
+            id: -Date.now(),
+            created_at: new Date().toISOString(),
+            is_complete: false,
+            ...newItemPayload
+        } as any;
 
-            const newItems = [tempItem, ...items];
-            setItems(newItems);
-            saveToCache(CACHE_KEYS.WISHLIST(list.id), newItems);
+        const newItems = [tempItem, ...items];
+        setItems(newItems);
+        saveToCache(CACHE_KEYS.WISHLIST(list.id), newItems);
 
-            SyncQueue.add({
-                type: 'ADD_WISHLIST_ITEM',
-                payload: tempItem,
-                householdId: list.household_id
-            });
+        SyncQueue.add({ type: 'ADD_WISHLIST_ITEM', payload: tempItem, householdId: list.household_id });
 
-            setIsFormOpen(false);
-            setForm({ name: "", description: "", category: "Item", target_amount: "", saved_amount: "", quantity: "1", link: "", priority: "Medium" });
-            triggerNotificationHaptic(NotificationType.Success);
-        };
+        setIsFormOpen(false);
+        setForm({ name: "", description: "", category: "Item", target_amount: "", saved_amount: "", quantity: "1", link: "", priority: "Medium" });
+        triggerNotificationHaptic(NotificationType.Success);
+        toast.success("Goal added!");
 
         if (navigator.onLine) {
-            try {
-                const { data, error } = await supabase.from('wishlist_items').insert(newItemPayload).select().single();
-                if (error) throw error;
-
-                const newItems = [data as WishlistItem, ...items];
-                setItems(newItems);
-                saveToCache(CACHE_KEYS.WISHLIST(list.id), newItems);
-                setIsFormOpen(false);
-                setForm({ name: "", description: "", category: "Item", target_amount: "", saved_amount: "", quantity: "1", link: "", priority: "Medium" });
-                triggerNotificationHaptic(NotificationType.Success);
-            } catch (err) {
-                console.warn("Online add failed, falling back to offline queue.", err);
-                executeOfflineSave();
+            const { data, error } = await supabase.from('wishlist_items').insert(newItemPayload).select().single();
+            if (!error) {
+                const updatedItems = [data as WishlistItem, ...items];
+                setItems(updatedItems);
+                saveToCache(CACHE_KEYS.WISHLIST(list.id), updatedItems);
             }
-        } else {
-            executeOfflineSave();
         }
     }
 
@@ -237,11 +224,10 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         setContribForm({ amount: "", note: "" });
 
         const { error } = await supabase.from('wishlist_items').update({ saved_amount: newSaved }).eq('id', selectedItemForContrib.id);
-
-        if (error) {
-            alert("Failed to add funds.");
-        } else {
+        if (error) toast.error("Failed to add funds.");
+        else {
             triggerNotificationHaptic(NotificationType.Success);
+            toast.success("Funds added!");
         }
     }
 
@@ -249,30 +235,27 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         if (!editingItem) return;
         setItems(items.map(i => i.id === editingItem.id ? { ...i, ...updatedItem } as WishlistItem : i));
         setEditingItem(null);
-        const { data, error } = await supabase.from('wishlist_items').update({
+        await supabase.from('wishlist_items').update({
             name: updatedItem.name, description: updatedItem.description, category: updatedItem.category, target_amount: updatedItem.target_amount,
-            saved_amount: updatedItem.saved_amount,
-            quantity: updatedItem.quantity, link: updatedItem.link, priority: updatedItem.priority
-        }).eq('id', editingItem.id).select().single();
+            saved_amount: updatedItem.saved_amount, quantity: updatedItem.quantity, link: updatedItem.link, priority: updatedItem.priority
+        }).eq('id', editingItem.id);
+        toast.success("Updated!");
     };
 
     const handleTogglePrivacy = async () => {
         const newStatus = !listSettings.isPrivate;
-        const { error } = await supabase.from('lists').update({ is_private: newStatus }).eq('id', list.id);
-        if (!error) {
-            setListSettings({ ...listSettings, isPrivate: newStatus });
-            alert(`List is now ${newStatus ? 'Private' : 'Shared'}`);
-        }
+        await supabase.from('lists').update({ is_private: newStatus }).eq('id', list.id);
+        setListSettings({ ...listSettings, isPrivate: newStatus });
+        toast.success(`List is now ${newStatus ? 'Private' : 'Shared'}`);
     }
 
     const handleDelete = async () => {
         triggerHaptic(ImpactStyle.Medium);
         if (!deleteConfirm) return;
         if (deleteConfirm.type === 'item' && deleteConfirm.id) {
-            const oldItems = [...items];
             setItems(items.filter(item => item.id !== deleteConfirm.id));
-            const { error } = await supabase.from("wishlist_items").delete().eq("id", deleteConfirm.id);
-            if (error) setItems(oldItems);
+            await supabase.from("wishlist_items").delete().eq("id", deleteConfirm.id);
+            toast.success("Deleted.");
         } else if (deleteConfirm.type === 'list') {
             await supabase.from('lists').delete().eq('id', list.id); window.location.reload();
         }
@@ -283,143 +266,146 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         triggerHaptic(ImpactStyle.Light);
         const newStatus = !item.is_complete;
         setItems(items.map(i => i.id === item.id ? { ...i, is_complete: newStatus } : i));
-        const { error } = await supabase.from("wishlist_items").update({ is_complete: newStatus }).eq("id", item.id)
-        if (error) {
-            setItems(items.map(i => i.id === item.id ? { ...i, is_complete: !newStatus } : i));
-        }
+        await supabase.from("wishlist_items").update({ is_complete: newStatus }).eq("id", item.id)
     }
 
     return (
-        <div className={`space-y-6 pb-24 transition-opacity duration-500 ${usingCachedData ? 'opacity-90 grayscale-[10%]' : ''}`}>
-            <div className="flex items-center justify-between">
-                <div>
-                    <h2 className="text-2xl font-bold text-slate-800">{list.name}</h2>
-                    <div className="flex gap-2 mt-1">
-                        {listSettings.isPrivate ? <span className="flex items-center gap-1 text-xs text-rose-600 bg-rose-50 px-2 py-0.5 rounded-md border border-rose-100"><Lock className="w-3 h-3" /> Private</span> : <span className="flex items-center gap-1 text-xs text-cyan-600 bg-cyan-50 px-2 py-0.5 rounded-md border border-cyan-100"><Globe className="w-3 h-3" /> Shared</span>}
-                        {usingCachedData && <span className="flex items-center gap-1 text-xs text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200"><CloudOff className="w-3 h-3" /> Offline View</span>}
+        <div className={`space-y-6 pb-32`}>
+            {/* MATCHING SHOPPING LIST HEADER STYLE */}
+            <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
+                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+
+                <div className="relative z-10">
+                    <div className="flex items-center gap-2 mb-1">
+                        <h2 className="text-xl font-bold truncate max-w-[200px]">{listSettings.name}</h2>
+                        {/* Consistent Badge Style */}
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>
+                            {listSettings.isPrivate ? 'Private' : 'Shared'}
+                        </span>
+                        {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
+                    </div>
+                    <p className="text-xs text-slate-400 font-medium flex items-center gap-2">
+                        <Target className="w-3 h-3" /> {items.length} goals
+                        <span className="w-1 h-1 bg-slate-500 rounded-full"></span>
+                        {currencySymbol}{totalSaved.toLocaleString()} Saved
+                    </p>
+                </div>
+                <div className="relative z-10 text-right">
+                    <div className="flex gap-2 justify-end">
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-white hover:bg-slate-800"><Settings className="w-5 h-5" /></Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuLabel>List Options</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={() => setIsRenameOpen(true)}><Pencil className="w-4 h-4 mr-2" /> Rename</DropdownMenuItem>
+                                <DropdownMenuItem onClick={handleTogglePrivacy}>{listSettings.isPrivate ? <Globe className="w-4 h-4 mr-2 text-cyan-500" /> : <Lock className="w-4 h-4 mr-2 text-rose-500" />} {listSettings.isPrivate ? "Make Public" : "Make Private"}</DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'list' })}><Trash2 className="w-4 h-4 mr-2" /> Delete List</DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
                     </div>
                 </div>
-                <DropdownMenu>
-                    <DropdownMenuTrigger asChild><Button variant="outline" size="icon"><Settings className="w-4 h-4" /></Button></DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                        <DropdownMenuLabel>List Options</DropdownMenuLabel>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => setIsRenameOpen(true)}><Pencil className="w-4 h-4 mr-2" /> Rename</DropdownMenuItem>
-                        <DropdownMenuItem onClick={handleTogglePrivacy}>{listSettings.isPrivate ? <Globe className="w-4 h-4 mr-2 text-cyan-500" /> : <Lock className="w-4 h-4 mr-2 text-rose-500" />} {listSettings.isPrivate ? "Make Public" : "Make Private"}</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'list' })}><Trash2 className="w-4 h-4 mr-2" /> Delete List</DropdownMenuItem>
-                    </DropdownMenuContent>
-                </DropdownMenu>
             </div>
 
-            <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-y border-slate-100 px-6 py-4 shadow-sm flex flex-col gap-2">
-                <div className="flex justify-between items-end"><span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Total Progress</span><span className="text-sm font-bold text-cyan-700">{Math.round(totalProgress)}%</span></div>
-                {/* ⚡ UPDATED: Shrink Progress Bar (h-1.5) & Cyan Color */}
-                <Progress value={totalProgress} className="h-1.5 bg-cyan-100" indicatorClassName="bg-cyan-500" />
-                <div className="flex justify-between text-[10px] text-slate-500 font-medium"><span>{currencySymbol}{totalSaved.toLocaleString()} Saved</span><span>Target: {currencySymbol}{totalTarget.toLocaleString()}</span></div>
+            {/* MATCHING PROGRESS BAR */}
+            <div className="bg-slate-900 pb-1 -mt-6">
+                <Progress value={totalProgress} className="h-1.5 bg-slate-800 rounded-none" indicatorClassName="bg-lime-500" />
             </div>
 
-            <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setPage(1); }}>
-                {/* ⚡ CHANGED: Icons in Tabs */}
-                <TabsList className="grid w-full grid-cols-5 mb-4">{
-                    [
-                        { label: "All", icon: Gem },
-                        { label: "Item", icon: Target },
-                        { label: "Project", icon: ListChecks },
-                        { label: "Vacation", icon: Plane },
-                        { label: "Other", icon: MoreHorizontal }
-                    ].map(({ label, icon: Icon }) => (
-                        <TabsTrigger key={label} value={label} className="text-xs flex gap-1 items-center data-[state=active]:text-cyan-700 data-[state=active]:bg-cyan-50">
-                            <Icon className="w-3 h-3" /> {label}
-                        </TabsTrigger>
-                    ))
-                }</TabsList>
-                <TabsContent value={activeTab} className="animate-in fade-in slide-in-from-bottom-2 space-y-3">
-                    {visibleItems.length === 0 && <div className="text-center py-12 text-slate-400 flex flex-col items-center"><Goal className="w-12 h-12 opacity-20 mb-2" /> No active goals in this category.</div>}
-                    {visibleItems.map(item => {
-                        const progress = getProgress(item.saved_amount, item.target_amount);
-                        const isExpanded = expandedId === item.id;
-                        const isHigh = item.priority === 'High';
+            {/* TABS & FILTERS */}
+            <div className="px-4">
+                <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setPage(1); }}>
+                    <TabsList className="grid w-full grid-cols-5 mb-4 bg-slate-100 p-1">
+                        {[
+                            { label: "All", icon: Gem },
+                            { label: "Item", icon: Target },
+                            { label: "Project", icon: ListChecks },
+                            { label: "Vacation", icon: Plane },
+                            { label: "Other", icon: MoreHorizontal }
+                        ].map(({ label, icon: Icon }) => (
+                            <TabsTrigger key={label} value={label} className="text-[10px] flex flex-col gap-1 items-center data-[state=active]:text-slate-900 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                                <Icon className="w-3 h-3" /> {label}
+                            </TabsTrigger>
+                        ))}
+                    </TabsList>
 
-                        return (
-                            <div key={item.id} className={`border rounded-xl transition-all duration-200 overflow-hidden ${getPriorityCardStyle(item.priority || 'Medium')} ${isExpanded ? 'shadow-md ring-1 ring-slate-200' : 'shadow-sm'}`}>
-                                <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : item.id)}>
-                                    <Checkbox checked={item.is_complete} onCheckedChange={() => toggleComplete(item)} onClick={(e) => e.stopPropagation()} className="mt-0.5 rounded-full data-[state=checked]:bg-emerald-500 border-slate-400" />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex justify-between items-center mb-1">
-                                            <h3 className={`font-bold text-base truncate ${isHigh ? 'text-rose-800' : 'text-slate-800'}`}>{item.name}</h3>
-                                            <span className="text-xs font-bold text-slate-600">{Math.round(progress)}%</span>
+                    <TabsContent value={activeTab} className="space-y-3">
+                        {isLoading && items.length === 0 ? (
+                            <p className="text-center py-12 text-slate-400">Loading...</p>
+                        ) : visibleItems.length === 0 ? (
+                            <div className="text-center py-12 text-slate-400 flex flex-col items-center"><Goal className="w-12 h-12 opacity-20 mb-2" /> No active goals here.</div>
+                        ) : (
+                            visibleItems.map(item => {
+                                const progress = getProgress(item.saved_amount, item.target_amount);
+                                const isExpanded = expandedId === item.id;
+                                const isHigh = item.priority === 'High';
+
+                                return (
+                                    <div key={item.id} className={`border rounded-xl transition-all duration-200 overflow-hidden ${getPriorityCardStyle(item.priority || 'Medium')} ${isExpanded ? 'shadow-md ring-1 ring-lime-200' : 'shadow-sm'}`}>
+                                        <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : item.id)}>
+                                            <Checkbox checked={item.is_complete} onCheckedChange={() => toggleComplete(item)} onClick={(e) => e.stopPropagation()} className="mt-0.5 rounded-full data-[state=checked]:bg-emerald-500 border-slate-400" />
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex justify-between items-center mb-1">
+                                                    <h3 className={`font-bold text-sm truncate ${isHigh ? 'text-rose-800' : 'text-slate-800'}`}>{item.name}</h3>
+                                                    <span className="text-xs font-bold text-slate-600">{Math.round(progress)}%</span>
+                                                </div>
+                                                <Progress value={progress} className="h-1.5 bg-slate-100" indicatorClassName={getProgressColor(progress)} />
+                                            </div>
+                                            <div className="text-slate-400">{isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
                                         </div>
-                                        <Progress
-                                            value={progress}
-                                            className="h-1.5 bg-slate-100"
-                                            indicatorClassName={getProgressColor(progress)}
-                                        />
+                                        {isExpanded && (
+                                            <div className="px-4 pb-4 pt-0 bg-slate-50/50 border-t border-slate-100 animate-in slide-in-from-top-1">
+                                                <div className="flex justify-between text-xs text-slate-500 mt-3 mb-3 font-medium">
+                                                    <span>Saved: {currencySymbol}{item.saved_amount?.toLocaleString()}</span>
+                                                    <span>Target: {currencySymbol}{item.target_amount?.toLocaleString()}</span>
+                                                </div>
+                                                {item.description && <p className="text-xs text-slate-600 italic mb-3 bg-white p-2 rounded border border-slate-100">{item.description}</p>}
+                                                <div className="flex gap-2 mt-2">
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="flex-1 h-9 text-xs bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 font-semibold"
+                                                        onClick={() => { setSelectedItemForContrib(item); setIsContributionOpen(true) }}
+                                                    >
+                                                        <Plus className="w-3 h-3 mr-1" /> Add Savings
+                                                    </Button>
+                                                    {item.link && <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => window.open(item.link!, '_blank')}><LinkIcon className="w-4 h-4 text-blue-500" /></Button>}
+                                                    {item.user_id === user.id && (
+                                                        <DropdownMenu>
+                                                            <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" className="h-9 w-9 p-0 hover:bg-slate-100"><MoreHorizontal className="w-4 h-4 text-slate-500" /></Button></DropdownMenuTrigger>
+                                                            <DropdownMenuContent align="end">
+                                                                <DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Details</DropdownMenuItem>
+                                                                <DropdownMenuSeparator />
+                                                                <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
+                                                            </DropdownMenuContent>
+                                                        </DropdownMenu>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    <div className="text-slate-400">{isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
-                                </div>
-                                {isExpanded && (
-                                    <div className="px-4 pb-4 pt-0 bg-white/50 border-t border-black/5 animate-in slide-in-from-top-1">
-                                        <div className="flex justify-between text-xs text-slate-500 mt-3 mb-3 font-medium">
-                                            <span>Saved: {currencySymbol}{item.saved_amount?.toLocaleString()}</span>
-                                            <span>Target: {currencySymbol}{item.target_amount?.toLocaleString()}</span>
-                                        </div>
-                                        {item.description && <p className="text-xs text-slate-600 italic mb-3 bg-white p-2 rounded border border-slate-100">{item.description}</p>}
-                                        <div className="flex gap-2 mt-2">
-                                            <Button
-                                                size="sm"
-                                                variant="outline"
-                                                className="flex-1 h-9 text-xs bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 font-semibold"
-                                                onClick={() => { setSelectedItemForContrib(item); setIsContributionOpen(true) }}
-                                            >
-                                                <Plus className="w-3 h-3 mr-1" /> Add Savings
-                                            </Button>
-                                            {item.link && <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => window.open(item.link!, '_blank')}><LinkIcon className="w-4 h-4 text-blue-500" /></Button>}
-                                            {item.user_id === user.id && (
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" className="h-9 w-9 p-0 hover:bg-slate-100"><MoreHorizontal className="w-4 h-4 text-slate-500" /></Button></DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Details</DropdownMenuItem>
-                                                        <DropdownMenuSeparator />
-                                                        <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            )}
-                                        </div>
-                                    </div>
-                                )}
-                            </div>
-                        )
-                    })}
-                    {hasMore && <Button variant="ghost" className="w-full text-xs text-slate-400" onClick={() => setPage(p => p + 1)}>Load More</Button>}
-                </TabsContent>
-            </Tabs>
+                                )
+                            })
+                        )}
+                        {hasMore && <Button variant="ghost" className="w-full text-xs text-slate-400" onClick={() => setPage(p => p + 1)}>Load More</Button>}
+                    </TabsContent>
+                </Tabs>
+            </div>
 
             {completedItems.length > 0 && (
-                <Accordion type="single" collapsible className="bg-slate-50 rounded-xl border border-slate-100 px-4 mt-4">
+                <Accordion type="single" collapsible className="bg-slate-50 rounded-xl border border-slate-100 px-4 mt-4 mx-4">
                     <AccordionItem value="completed" className="border-none">
                         <AccordionTrigger className="text-slate-400 hover:text-slate-600 py-2 text-sm">Completed Goals ({completedItems.length})</AccordionTrigger>
                         <AccordionContent>
                             {completedItems.map(item => (
                                 <div key={item.id} className="flex items-center justify-between p-3 border-b last:border-0 border-slate-200">
                                     <div className="flex items-center gap-3">
-                                        <Checkbox
-                                            checked={true}
-                                            onCheckedChange={() => toggleComplete(item)}
-                                            className="rounded-full border-slate-300 data-[state=checked]:bg-slate-400 data-[state=checked]:border-slate-400"
-                                        />
+                                        <Checkbox checked={true} onCheckedChange={() => toggleComplete(item)} className="rounded-full border-slate-300 data-[state=checked]:bg-slate-400 data-[state=checked]:border-slate-400" />
                                         <span className="line-through text-slate-400 text-sm">{item.name}</span>
                                     </div>
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" size="icon" className="h-7 w-7"><MoreHorizontal className="w-3.5 h-3.5 text-slate-400" /></Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            <DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Details</DropdownMenuItem>
-                                            <DropdownMenuSeparator />
-                                            <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-300" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-3.5 h-3.5" /></Button>
                                 </div>
                             ))}
                         </AccordionContent>
@@ -427,12 +413,11 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </Accordion>
             )}
 
-            {/* ⚡ FAB Label is now "Add Goal/Item" */}
-            <PortalFAB onClick={() => setIsFormOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-cyan-600 hover:bg-cyan-700 text-white flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} label="Add Goal/Item" />
+            {/* LIME FAB */}
+            <PortalFAB onClick={() => setIsFormOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} label="New Goal" />
 
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl">
-                    {/* ⚡ UPDATED: Dialog Title */}
                     <DialogHeader><DialogTitle>Add New Goal/Item</DialogTitle></DialogHeader>
                     <form onSubmit={handleAddItem} className="grid grid-cols-2 gap-4 py-2">
                         <div className="col-span-2"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="h-11" required autoComplete="off" /></div>
@@ -442,7 +427,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                             <div><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
                             <div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div>
                         </div>
-                        <Button type="submit" className="col-span-2 h-11 bg-cyan-600 text-base hover:bg-cyan-700">Create Goal</Button>
+                        <Button type="submit" className="col-span-2 h-11 bg-lime-600 text-slate-900 font-bold text-base hover:bg-lime-700">Create Goal</Button>
                     </form>
                 </DialogContent>
             </Dialog>

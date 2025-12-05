@@ -9,6 +9,9 @@ export const CACHE_KEYS = {
     LISTS_SUMMARY: (householdId: string, type: string) => `offline_lists_${householdId}_${type}`,
     FINANCE_DATA: (householdId: string) => `offline_finance_${householdId}`,
     FINANCE_CREDITS: (householdId: string) => `offline_credits_${householdId}`,
+
+    // ⚡ ADDED: The missing key for Dashboard caching
+    MEMBER_COUNT: (householdId: string) => `offline_member_count_${householdId}`,
 };
 
 export function saveToCache(key: string, data: any) {
@@ -29,7 +32,10 @@ export function loadFromCache<T>(key: string): T | null {
         const item = localStorage.getItem(key);
         if (!item) return null;
         const parsed = JSON.parse(item);
-        // Optional: Check timestamp validity here if needed (e.g. expire after 7 days)
+
+        // Optional: You could add logic here to ignore cache if > 7 days old
+        // if (Date.now() - parsed.timestamp > 7 * 24 * 60 * 60 * 1000) return null;
+
         return parsed.data as T;
     } catch (e) {
         return null;

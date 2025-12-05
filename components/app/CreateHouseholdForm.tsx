@@ -14,6 +14,7 @@ import {
     CheckCircle2, ChevronLeft, Plus, Sparkles, QrCode, MapPin
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { compressImage } from "@/lib/utils" //
 
 // --- CONSTANTS ---
 const COUNTRIES = ["Nigeria", "United States", "United Kingdom", "Canada", "Ghana", "South Africa", "Kenya"];
@@ -33,29 +34,6 @@ const BarcodeScanner = {
     scan: async (options?: any) => ({ barcodes: [{ rawValue: 'MOCK_CODE_123' }] })
 };
 const BarcodeFormat = { QrCode: 'QR_CODE' };
-
-// --- HELPER: IMAGE COMPRESSION ---
-const compressImage = (file: File): Promise<File> => {
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.src = URL.createObjectURL(file);
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            if (!ctx) { reject(new Error("Canvas error")); return; }
-            const MAX = 500;
-            let w = img.width, h = img.height;
-            if (w > h) { if (w > MAX) { h *= MAX / w; w = MAX; } } else { if (h > MAX) { w *= MAX / h; h = MAX; } }
-            canvas.width = w; canvas.height = h;
-            ctx.drawImage(img, 0, 0, w, h);
-            canvas.toBlob(blob => {
-                if (blob) resolve(new File([blob], file.name, { type: 'image/jpeg' }));
-                else reject(new Error("Compression failed"));
-            }, 'image/jpeg', 0.8);
-        };
-        img.onerror = reject;
-    });
-}
 
 // --- ANIMATION CONFIG ---
 const animationItems = [
