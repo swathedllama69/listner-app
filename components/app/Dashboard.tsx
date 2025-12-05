@@ -9,14 +9,13 @@ import { App as CapApp } from "@capacitor/app"
 import { StatusBar, Style } from "@capacitor/status-bar"
 import { PushNotifications } from "@capacitor/push-notifications"
 
-// UI Imports
+// UI Imports (Ensure all used components are here)
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
-// ⚡ FIX: Added Pencil to the import list
 import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt, Loader2, ArrowDown, ListChecks, CheckCircle2, Goal, TrendingUp, ArrowDownRight, User as UserIcon } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -24,7 +23,7 @@ import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
 
 // ⚡ REAL IMPORTS (Using your existing files)
-import { SidebarLayout } from "@/components/ui/SidebarLayout" // Fixed: No longer conflicts
+import { SidebarLayout } from "@/components/ui/SidebarLayout"
 import { ListDetail } from "@/components/app/ListDetail"
 import { ShoppingList } from "@/components/app/ShoppingList"
 import { Finance } from "@/components/app/Finance"
@@ -49,7 +48,7 @@ type ListSummary = {
 };
 
 
-// --- HELPER COMPONENTS ---
+// --- AUXILIARY HELPER COMPONENTS (Required by ListManager/SettingsView) ---
 
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
@@ -120,6 +119,32 @@ function PullToRefresh({ onRefresh, children }: { onRefresh: () => Promise<void>
         </div>
     );
 }
+
+// ⚡ IMAGE COMPRESSION (Needed by SettingsView, placed here to avoid conflict)
+const compressImage = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.src = URL.createObjectURL(file);
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) { reject(new Error("Canvas not supported")); return; }
+            const MAX_SIZE = 800;
+            let width = img.width; let height = img.height;
+            if (width > height) { if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } }
+            else { if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } }
+            canvas.width = width; canvas.height = height;
+            ctx.drawImage(img, 0, 0, width, height);
+            canvas.toBlob((blob) => {
+                if (!blob) { reject(new Error("Compression failed")); return; }
+                resolve(blob);
+            }, 'image/jpeg', 0.7);
+        };
+        img.onerror = (error) => reject(error);
+    });
+}
+// -------------------------------------------------------------------------
+
 
 // --- CREATE MENU ---
 function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess, currencySymbol, viewScope }: {
@@ -236,7 +261,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     useEffect(() => { onListSelected(!!selectedList) }, [selectedList, onListSelected])
 
     const fetchLists = async () => {
-        setIsLoading(true);
+        setIsLoading(true)
         try {
             // Parallel Fetching for speed
             const [listsResult, summariesResult] = await Promise.all([
@@ -594,8 +619,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                             <Button variant="ghost" size="icon" onClick={togglePrivacy} className="text-slate-400 hover:bg-slate-100 rounded-full">
                                 {hideBalances ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </Button>
-
-                            {/* ⚡ NEW PROFILE/SETTINGS BUTTON (Moved to greeting click) */}
 
                             <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-lime-500 text-slate-900 rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-lime-600">
                                 <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Sync
