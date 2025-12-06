@@ -324,12 +324,14 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     if (selectedList) {
         return (
-            <div className="fixed inset-0 z-[100] bg-slate-50 animate-in slide-in-from-right-10 duration-300 overflow-y-auto">
+            // ⚡ FIX: Render the List Detail in a Fixed container to escape the Dashboard stacking context
+            <div className="fixed inset-0 z-[100] bg-slate-50 animate-in slide-in-from-right-10 duration-300 overflow-y-auto pointer-events-auto">
                 <div className="w-full min-h-full p-4 pt-14 pb-32">
+                    {/* Back button needs explicit pointer-events to be clickable inside the overall auto-capture */}
                     <Button
                         variant="ghost"
                         onClick={handleBack}
-                        className="mb-4 bg-white/80 backdrop-blur hover:bg-white text-slate-600 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm border border-slate-200"
+                        className="mb-4 bg-white/80 backdrop-blur hover:bg-white text-slate-600 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm border border-slate-200 pointer-events-auto"
                     >
                         <ArrowLeft className="w-4 h-4" /> Back to Lists
                     </Button>
@@ -449,6 +451,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                             </div>
                                             <h3 className="font-bold text-slate-800 text-lg mb-0 truncate flex-1">{list.name}</h3>
 
+                                            {/* ⚡ RED PADLOCK */}
                                             {list.is_private && <Lock className="w-5 h-5 text-red-500 fill-red-50 stroke-[2.5]" />}
                                         </div>
 

@@ -8,7 +8,10 @@ import { OnboardingScreen } from '@/components/app/OnboardingScreen';
 import { Tutorial } from '@/components/app/Tutorial';
 import { CreateHouseholdForm } from '@/components/app/CreateHouseholdForm';
 import { Household } from '@/lib/types';
-import { Loader2, AlertTriangle, LogOut, Mail, Lock, Wand2, ArrowRight, ArrowLeft, ShoppingCart, CheckCircle2, ListChecks, Users, Wallet, ShieldCheck } from "lucide-react";
+import {
+  Loader2, ShieldCheck, Users, Mail, Lock, Wand2, ArrowLeft,
+  CheckCircle2, ArrowRight, ListChecks, ShoppingCart, Wallet, AlertTriangle, LogOut
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,15 +33,22 @@ export default function Home() {
   return <AuthWrapper />;
 }
 
+// --- AUTH WRAPPER ---
 function AuthWrapper() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [stage, setStage] = useState<'LOADING' | 'WELCOME' | 'AUTH' | 'TUTORIAL' | 'SETUP_HOUSEHOLD' | 'APP' | 'ERROR'>('LOADING');
   const [household, setHousehold] = useState<Household | null>(null);
   const [debugMsg, setDebugMsg] = useState("Initializing...");
   const [errorDetails, setErrorDetails] = useState("");
+
+  // New State for Subtle Reconnecting
   const [isReconnecting, setIsReconnecting] = useState(false);
+
+  // Refs for State Access
   const stageRef = useRef(stage);
   const userRef = useRef(user);
+
+  // Deep Link Refs
   const isProcessingDeepLink = useRef(false);
   const processedUrls = useRef<Set<string>>(new Set());
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -46,20 +56,45 @@ function AuthWrapper() {
   useEffect(() => { stageRef.current = stage; }, [stage]);
   useEffect(() => { userRef.current = user; }, [user]);
 
+  // --- 💡 PUSH NOTIFICATION SETUP ---
   const setupPushNotifications = async (currentUser: User) => {
     if (!Capacitor.isNativePlatform()) return;
+
     try {
       let permStatus = await PushNotifications.checkPermissions();
-      if (permStatus.receive !== 'granted') permStatus = await PushNotifications.requestPermissions();
+      if (permStatus.receive !== 'granted') {
+        permStatus = await PushNotifications.requestPermissions();
+      }
+
       if (permStatus.receive !== 'granted') return;
+
       await PushNotifications.register();
-      await PushNotifications.createChannel({ id: 'PushNotifications', name: 'General Notifications', importance: 5, visibility: 1, sound: 'default', vibration: true });
+      await PushNotifications.createChannel({
+        id: 'PushNotifications',
+        name: 'General Notifications',
+        importance: 5,
+        visibility: 1,
+        sound: 'default',
+        vibration: true,
+      });
+
       await PushNotifications.removeAllListeners();
-      PushNotifications.addListener('registration', async (token) => { await supabase.from('device_tokens').upsert({ user_id: currentUser.id, token: token.value }, { onConflict: 'token' }); });
-      PushNotifications.addListener('pushNotificationActionPerformed', (action) => { const data = action.notification.data; if (data?.link) (async () => { await (App as any).openUrl({ url: data.link }); })(); });
-    } catch (e) { console.error("Push Setup Error:", e); }
+
+      PushNotifications.addListener('registration', async (token) => {
+        // Save to 'device_tokens' table
+        await supabase.from('device_tokens').upsert({ user_id: currentUser.id, token: token.value }, { onConflict: 'token' });
+      });
+
+      PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+        const data = action.notification.data;
+        if (data?.link) (async () => { await (App as any).openUrl({ url: data.link }); })();
+      });
+    } catch (e) {
+      console.error("Push Setup Error:", e);
+    }
   };
 
+  // --- 1. CORE DATA FETCHING ---
   const loadUserData = async (currentUser: User, bypassCache = false) => {
     const userCacheKey = CACHE_KEYS.USER_PROFILE(currentUser.id);
     const householdCacheKey = CACHE_KEYS.HOUSEHOLD(currentUser.id);
@@ -74,19 +109,29 @@ function AuthWrapper() {
       }
     }
 
+    // FETCH FROM NETWORK
     try {
       if (!isReconnecting) setDebugMsg("Loading Profile...");
+
       setupPushNotifications(currentUser);
 
       let appVersion = 'Web';
-      if (Capacitor.isNativePlatform()) { try { const info = await App.getInfo(); appVersion = info.version; } catch (e) { } }
+      if (Capacitor.isNativePlatform()) {
+        try { const info = await App.getInfo(); appVersion = info.version; } catch (e) { }
+      }
 
       await supabase.from('profiles').update({ last_active_at: new Date().toISOString(), app_version: appVersion }).eq('id', currentUser.id);
 
       let username = currentUser.email?.split('@')[0] || 'user';
       if (username.length < 3) username = username + '_user';
 
-      let { data: profile } = await supabase.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
+      // ⚡ FIX: Use .maybeSingle() instead of .single() to prevent 406 Errors if profile doesn't exist yet
+      let { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', currentUser.id)
+        .maybeSingle();
+
 
       if (!profile) {
         const { data: newProfile, error: createError } = await supabase.from('profiles').upsert({
@@ -110,18 +155,24 @@ function AuthWrapper() {
       const localSeen = typeof window !== 'undefined' ? localStorage.getItem(`tutorial_seen_${currentUser.id}`) : null;
       if (localSeen === 'true') mergedUser.has_seen_tutorial = true;
 
+      // Update State & Cache
       setUser(mergedUser);
       setHousehold(currentHousehold);
+
       saveToCache(userCacheKey, mergedUser);
       if (currentHousehold) saveToCache(householdCacheKey, currentHousehold);
 
+      // Transition Stage
       if (stage !== 'APP') {
         if (currentHousehold) {
+          // If household exists, check if tutorial is seen
           setStage(mergedUser.has_seen_tutorial ? 'APP' : 'TUTORIAL');
         } else {
+          // If no household, go to setup
           setStage('SETUP_HOUSEHOLD');
         }
       }
+
       setIsReconnecting(false);
 
     } catch (err: any) {
@@ -135,15 +186,22 @@ function AuthWrapper() {
     }
   };
 
+  // --- 2. DEEP LINK HANDLER ---
   const handleDeepLink = async (url: string) => {
     if (processedUrls.current.has(url)) return;
     processedUrls.current.add(url);
+
     isProcessingDeepLink.current = true;
     setStage('LOADING');
     setDebugMsg("Authenticating...");
+
     try {
       const { data: existing } = await supabase.auth.getSession();
-      if (existing.session?.user) { await loadUserData(existing.session.user); return; }
+      if (existing.session?.user) {
+        await loadUserData(existing.session.user);
+        return;
+      }
+
       if (url.includes('code=')) {
         const params = new URLSearchParams(url.split('?')[1]);
         const code = params.get('code');
@@ -158,78 +216,148 @@ function AuthWrapper() {
         const params = new URLSearchParams(hash);
         const access_token = params.get('access_token');
         const refresh_token = params.get('refresh_token');
+
         if (access_token && refresh_token) {
           const { data, error } = await supabase.auth.setSession({ access_token, refresh_token });
           if (error) throw error;
           if (data.user) await loadUserData(data.user);
         }
       }
-    } catch (e: any) { setErrorDetails(e.message); setStage('ERROR'); } finally { isProcessingDeepLink.current = false; }
+    } catch (e: any) {
+      setErrorDetails(e.message);
+      setStage('ERROR');
+    } finally {
+      isProcessingDeepLink.current = false;
+    }
   };
 
+  // --- CONNECTION LOGIC ---
   const attemptReconnect = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) {
       setIsReconnecting(true);
-      try { await loadUserData(session.user); } catch (err) { if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current); retryTimeoutRef.current = setTimeout(attemptReconnect, 3000); }
+      try {
+        await loadUserData(session.user);
+      } catch (err) {
+        if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+        retryTimeoutRef.current = setTimeout(attemptReconnect, 3000);
+      }
     }
   };
 
   const handleAppResume = async () => {
     const currentStage = stageRef.current;
     const { data: { session } } = await supabase.auth.getSession();
+
     if (session?.user) {
-      if (currentStage === 'APP' || currentStage === 'SETUP_HOUSEHOLD' || currentStage === 'TUTORIAL') { attemptReconnect(); }
-      else { try { await loadUserData(session.user); } catch (e: any) { if (!userRef.current) { setErrorDetails(e.message); setStage('ERROR'); } else { attemptReconnect(); } } }
+      if (currentStage === 'APP' || currentStage === 'SETUP_HOUSEHOLD' || currentStage === 'TUTORIAL') {
+        attemptReconnect();
+      } else {
+        try {
+          await loadUserData(session.user);
+        } catch (e: any) {
+          if (!userRef.current) {
+            setErrorDetails(e.message);
+            setStage('ERROR');
+          } else {
+            attemptReconnect();
+          }
+        }
+      }
     }
   };
 
+  // --- 3. LISTENERS ---
   useEffect(() => {
     if (Capacitor.isNativePlatform()) {
       App.removeAllListeners();
       App.addListener('appUrlOpen', (data) => handleDeepLink(data.url));
-      App.addListener('appStateChange', ({ isActive }) => { if (isActive) handleAppResume(); });
-      App.getLaunchUrl().then((launchData) => { if (launchData?.url) handleDeepLink(launchData.url); });
+      App.addListener('appStateChange', ({ isActive }) => {
+        if (isActive) handleAppResume();
+      });
+      App.getLaunchUrl().then((launchData) => {
+        if (launchData?.url) handleDeepLink(launchData.url);
+      });
     }
+
     const handleOnline = () => attemptReconnect();
     const handleOffline = () => setIsReconnecting(true);
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current); }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current);
+    }
   }, []);
 
+  // --- 4. INITIAL AUTH ---
   useEffect(() => {
     let mounted = true;
     const init = async () => {
       if (isProcessingDeepLink.current) return;
+
       const { data: { session } } = await supabase.auth.getSession();
       if (mounted) {
         try {
-          if (session?.user) { await loadUserData(session.user); } else { if (!isProcessingDeepLink.current) setStage('AUTH'); }
-        } catch (err: any) { if (session?.user) { setTimeout(init, 3000); } else { setStage('AUTH'); } }
+          if (session?.user) {
+            await loadUserData(session.user);
+          } else {
+            if (!isProcessingDeepLink.current) setStage('AUTH');
+          }
+        } catch (err: any) {
+          // ⚡ MODIFIED: Retry logic for robustness
+          if (session?.user) {
+            setTimeout(init, 3000);
+          } else {
+            setStage('AUTH');
+          }
+        }
       }
     };
     init();
+
+    // ⚡ FIX: Added USER_UPDATED listener to immediately reload fresh data after OnboardingWizard completes.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user && !user) loadUserData(session.user);
       else if (event === 'SIGNED_OUT') window.location.reload();
-      else if (event === 'USER_UPDATED' && session?.user) loadUserData(session.user, true);
+      else if (event === 'USER_UPDATED' && session?.user) loadUserData(session.user, true); // Bypass cache for fresh profile data
     });
-    const timeout = setTimeout(() => { if (stageRef.current === 'LOADING') { console.warn("⚠️ App stuck on loading. Resetting..."); setStage('AUTH'); } }, 60000);
+
+    // ⚡ TIMEOUT: Increased to 60s
+    const timeout = setTimeout(() => {
+      if (stageRef.current === 'LOADING') {
+        console.warn("⚠️ App stuck on loading. Resetting...");
+        setStage('AUTH');
+      }
+    }, 60000);
+
     return () => { mounted = false; subscription.unsubscribe(); clearTimeout(timeout); };
   }, []);
 
+  // --- TUTORIAL HANDLERS ---
+  // Permanent completion (saves to DB)
   const handleTutorialComplete = async () => {
     if (!user) return;
+
+    // 1. Mark tutorial seen locally and to DB
     setUser({ ...user, has_seen_tutorial: true });
     localStorage.setItem(`tutorial_seen_${user.id}`, "true");
     await supabase.from('profiles').update({ has_seen_tutorial: true }).eq('id', user.id);
+
+    // ⚡ MODIFIED: Trigger fresh load and transition to APP
     await loadUserData(user, true);
     setStage('APP');
   };
 
-  const handleTutorialClose = () => { setStage(household ? 'APP' : 'SETUP_HOUSEHOLD'); };
+  // Temporary close (shows again next time)
+  const handleTutorialClose = () => {
+    setStage(household ? 'APP' : 'SETUP_HOUSEHOLD');
+  };
 
+  // Safe area padding for non-app screens
   const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
 
   switch (stage) {
@@ -256,19 +384,26 @@ function AuthWrapper() {
     case 'AUTH': return <div className={safeAreaWrapper}><AuthPage /></div>;
     case 'TUTORIAL': return (
       <div className={safeAreaWrapper}>
-        <Tutorial onComplete={handleTutorialComplete} onClose={handleTutorialClose} />
+        <Tutorial
+          onComplete={handleTutorialComplete}
+          onClose={handleTutorialClose} // ⚡ Connected close handler
+        />
       </div>
     );
     case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => loadUserData(u, true)} /></div>;
-    case 'APP': return (
-      <div className="relative min-h-screen flex flex-col w-full pb-[env(safe-area-inset-bottom)]">
-        {user && household && <Dashboard user={user} household={household} />}
-      </div>
-    );
+
+    case 'APP':
+      return (
+        // Dashboard handles its own safe area spacing (pt-4/pt-12)
+        <div className="relative min-h-screen flex flex-col w-full pb-[env(safe-area-inset-bottom)]">
+          {user && household && <Dashboard user={user} household={household} />}
+        </div>
+      );
     default: return null;
   }
 }
 
+// --- AUTH PAGE ---
 function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -286,6 +421,7 @@ function AuthPage() {
     { title: "Fully Secured", desc: "Your financial and household data is protected with enterprise-grade encryption.", icon: ShieldCheck, color: "bg-indigo-500" },
   ];
 
+  // ⚡ OPTIMIZED ANIMATIONS (Floating Items Preserved, Background Blobs Removed for Performance)
   const animationItems = [
     { type: '🍎', size: 10, duration: 18, delay: 0, top: '10%', left: '10%', animKey: 'slowDrift1', isEmoji: true, opacity: 0.25 },
     { type: '💵', size: 14, duration: 18, delay: 10, bottom: '10%', left: '40%', animKey: 'slowDrift3', isEmoji: true, opacity: 0.15 },
