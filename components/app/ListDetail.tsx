@@ -1,3 +1,4 @@
+//
 "use client"
 
 import { useState, useEffect, FormEvent, ChangeEvent, useMemo } from "react"
@@ -21,12 +22,11 @@ import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
 import { SyncQueue } from "@/lib/syncQueue"
 import { Capacitor } from "@capacitor/core"
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
-import toast from 'react-hot-toast' // ⚡ SIMPLE IMPORT
+import toast from 'react-hot-toast'
 
 const categories = ["Item", "Project", "Vacation", "Other"]
 const priorities = ["High", "Medium", "Low"]
 
-// ⚡ RESTORED: Dynamic Priority Colors
 const getPriorityCardStyle = (p: string) => {
     switch (p) {
         case 'High': return 'border-l-4 border-l-rose-500 bg-white';
@@ -64,7 +64,6 @@ const getProgress = (saved: number | null, target: number | null) => {
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            {/* ⚡ FIX I: Added DialogDescription */}
             <DialogContent className="sm:max-w-sm rounded-2xl">
                 <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
                 <DialogFooter className="flex gap-2 sm:justify-end"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button></DialogFooter>
@@ -133,18 +132,13 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
         loadData();
 
-        // ⚡ FIX J: Real-time listener implementation for Wishlist items
         const channel = supabase.channel(`wishlist_items_${list.id}`)
             .on('postgres_changes', { event: '*', schema: 'public', table: 'wishlist_items', filter: `list_id=eq.${list.id}` }, (payload) => {
-                // ✅ FIX: Use 'as any' temporarily for type safety and explicitly check for 'id' property.
                 const item = (payload.new || payload.old) as any;
-
-                // 🚨 CRITICAL FIX: Ensure item is a non-null object with an 'id'.
                 if (!item || !item.id) return;
 
                 setItems(prev => {
                     if (payload.eventType === 'INSERT') {
-                        // Avoid duplicates if the inserted item is already present (e.g., optimistic update followed by listener)
                         return [item as WishlistItem, ...prev.filter(i => i.id !== item.id)];
                     }
                     if (payload.eventType === 'UPDATE') {
@@ -231,9 +225,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         if (navigator.onLine) {
             const { data, error } = await supabase.from('wishlist_items').insert(newItemPayload).select().single();
             if (!error) {
-                // ⚡ FIX: Update state to replace the temporary item with the real one
                 setItems(prev => prev.map(i => i.id === tempItem.id ? data as WishlistItem : i).filter(i => i.id !== tempItem.id));
-                // Note: The real-time listener will also update this, but this is faster.
                 saveToCache(CACHE_KEYS.WISHLIST(list.id), [...items.filter(i => i.id !== tempItem.id), data as WishlistItem]);
             }
         }
@@ -247,7 +239,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         triggerHaptic(ImpactStyle.Light);
         const newSaved = (selectedItemForContrib.saved_amount || 0) + amount;
 
-        // Optimistic Update
         setItems(items.map(i => i.id === selectedItemForContrib.id ? { ...i, saved_amount: newSaved } : i));
         setIsContributionOpen(false);
         setContribForm({ amount: "", note: "" });
@@ -298,16 +289,15 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         await supabase.from("wishlist_items").update({ is_complete: newStatus }).eq("id", item.id)
     }
 
+    // ⚡ FIX: Removed z-20 to avoid unclickable areas when overlaid by fixed elements
     return (
-        <div className={`space-y-6 pb-32 relative z-20`}>
-            {/* MATCHING SHOPPING LIST HEADER STYLE */}
+        <div className={`space-y-6 pb-32 relative`}>
             <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
 
                 <div className="relative z-10">
                     <div className="flex items-center gap-2 mb-1">
                         <h2 className="text-xl font-bold truncate max-w-[200px]">{listSettings.name}</h2>
-                        {/* Consistent Badge Style */}
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>
                             {listSettings.isPrivate ? 'Private' : 'Shared'}
                         </span>
@@ -338,12 +328,10 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </div>
             </div>
 
-            {/* MATCHING PROGRESS BAR */}
             <div className="bg-slate-900 pb-1 -mt-6">
                 <Progress value={totalProgress} className="h-1.5 bg-slate-800 rounded-none" indicatorClassName="bg-lime-500" />
             </div>
 
-            {/* TABS & FILTERS */}
             <div className="px-4">
                 <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setPage(1); }}>
                     <TabsList className="grid w-full grid-cols-5 mb-4 bg-slate-100 p-1">
@@ -360,7 +348,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                         ))}
                     </TabsList>
 
-                    {/* ⚡ FIX D: Removed z-0 from TabsContent/CardContent to fix unclickable area */}
                     <TabsContent value={activeTab} className="space-y-3">
                         {isLoading && items.length === 0 ? (
                             <p className="text-center py-12 text-slate-400">Loading...</p>
@@ -443,12 +430,11 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </Accordion>
             )}
 
-            {/* LIME FAB */}
             <PortalFAB onClick={() => setIsFormOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} label="New Goal" />
 
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl">
-                    <DialogHeader><DialogTitle>Add New Goal/Item</DialogTitle><DialogDescription>Define a new saving goal or item target.</DialogDescription></DialogHeader> {/* FIX I */}
+                    <DialogHeader><DialogTitle>Add New Goal/Item</DialogTitle><DialogDescription>Define a new saving goal or item target.</DialogDescription></DialogHeader>
                     <form onSubmit={handleAddItem} className="grid grid-cols-2 gap-4 py-2">
                         <div className="col-span-2"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="h-11" required autoComplete="off" /></div>
                         <div><Label>Target ({currencySymbol})</Label><Input type="number" value={form.target_amount} onChange={e => setForm({ ...form, target_amount: e.target.value })} className="h-11" required autoComplete="off" /></div>
@@ -464,7 +450,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
             <Dialog open={isContributionOpen} onOpenChange={setIsContributionOpen}>
                 <DialogContent className="sm:max-w-sm rounded-2xl">
-                    <DialogHeader><DialogTitle>Add Funds</DialogTitle><DialogDescription>Enter the amount you are contributing.</DialogDescription></DialogHeader> {/* FIX I */}
+                    <DialogHeader><DialogTitle>Add Funds</DialogTitle><DialogDescription>Enter the amount you are contributing.</DialogDescription></DialogHeader>
                     <form onSubmit={handleAddContribution} className="space-y-4 py-2">
                         <div className="space-y-2"><Label>Amount ({currencySymbol})</Label><Input type="number" className="h-14 text-2xl font-bold text-center" placeholder="0.00" value={contribForm.amount} onChange={e => setContribForm({ ...contribForm, amount: e.target.value })} autoFocus autoComplete="off" /></div>
                         <Input placeholder="Note (optional)" value={contribForm.note} onChange={e => setContribForm({ ...contribForm, note: e.target.value })} className="h-11" autoComplete="off" />
@@ -479,7 +465,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
             <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}>
                 <DialogContent className="sm:max-w-sm rounded-2xl">
-                    <DialogHeader><DialogTitle>Rename List</DialogTitle><DialogDescription>Enter a new name for this list.</DialogDescription></DialogHeader> {/* FIX I */}
+                    <DialogHeader><DialogTitle>Rename List</DialogTitle><DialogDescription>Enter a new name for this list.</DialogDescription></DialogHeader>
                     <div className="flex gap-2 py-2"><Input value={listNameForm} onChange={e => setListNameForm(e.target.value)} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div>
                 </DialogContent>
             </Dialog>
@@ -496,7 +482,7 @@ function EditWishlistItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
     const handleSubmit = async (e: FormEvent) => { e.preventDefault(); setIsSubmitting(true); await onUpdate({ ...form, target_amount: parseFloat(form.target_amount) || null, saved_amount: parseFloat(form.saved_amount) || 0, quantity: form.category === "Item" ? parseInt(form.quantity) : null }); setIsSubmitting(false); onClose(); };
     return (
         <DialogContent className="sm:max-w-[625px] rounded-2xl">
-            <DialogHeader><DialogTitle>Edit Goal</DialogTitle><DialogDescription>Modify the details of your goal.</DialogDescription></DialogHeader> {/* FIX I */}
+            <DialogHeader><DialogTitle>Edit Goal</DialogTitle><DialogDescription>Modify the details of your goal.</DialogDescription></DialogHeader>
             <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4"><div className="col-span-2"><Label>Name</Label><Input name="name" value={form.name} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-2"><Label>Description</Label><Textarea name="description" value={form.description} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Target ({currencySymbol})</Label><Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-1"><Label>Saved ({currencySymbol})</Label><Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div><div className="col-span-1"><Label>Link</Label><Input name="link" value={form.link} onChange={handleChange} autoComplete="off" /></div><DialogFooter className="col-span-2"><Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button></DialogFooter></form>
         </DialogContent>
     );

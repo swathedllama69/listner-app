@@ -1,3 +1,4 @@
+//
 "use client"
 
 import { useState, useEffect, FormEvent, ChangeEvent, useMemo, useRef } from "react"
@@ -37,7 +38,6 @@ type ShoppingItem = {
 
 const priorities = ['Low', 'Medium', 'High'];
 
-// ⚡ UI HARMONIZATION: Updated border logic to match Wishlist style
 const getPriorityBorderClass = (priority: string) => {
     switch (priority) {
         case 'High': return 'border-l-4 border-l-rose-500';
@@ -51,8 +51,9 @@ function PortalFAB({ onClick, className, icon: Icon }: any) {
     useEffect(() => setMounted(true), []);
     if (!mounted) return null;
     return createPortal(
-        <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-[100]">
-            <Button onClick={onClick} className={className}>
+        // ⚡ FIX: Added pointer-events-none to container, auto to button to fix unclickable list
+        <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-[100] pointer-events-none">
+            <Button onClick={onClick} className={`${className} pointer-events-auto`}>
                 <Icon className="w-8 h-8" />
             </Button>
         </div>,
@@ -60,6 +61,7 @@ function PortalFAB({ onClick, className, icon: Icon }: any) {
     );
 }
 
+// ... [AlertDialog and ConfirmDialog components remain unchanged] ...
 function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -115,6 +117,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         }
     }
 
+    // ... [useEffect for data loading remains unchanged] ...
     useEffect(() => {
         let isMounted = true;
         const cacheKey = CACHE_KEYS.SHOPPING_LIST(list.id);
@@ -152,6 +155,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         return () => { isMounted = false; supabase.removeChannel(channel) }
     }, [list.id])
 
+    // ... [Helper functions: handleFormChange, handleCopyText, etc. remain unchanged] ...
     const handleFormChange = (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [e.target.name]: e.target.value });
     const handlePriorityChange = (value: string) => setForm({ ...form, priority: value });
 
@@ -340,9 +344,9 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const formQty = parseInt(form.quantity) || 1;
     const formTotal = formPrice * formQty;
 
-    // ⚡ FIX: Added z-20 to ensure card sits above other layers
+    // ⚡ FIX: Removed z-20 to avoid layer conflict with popups/portal
     return (
-        <Card className={`w-full rounded-2xl shadow-xl bg-white/80 backdrop-blur-sm relative border-none min-h-[80vh] flex flex-col z-20`}>
+        <Card className={`w-full rounded-2xl shadow-xl bg-white/80 backdrop-blur-sm relative border-none min-h-[80vh] flex flex-col`}>
             {/* Header Section */}
             <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
@@ -408,17 +412,16 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 </div>
             </div>
 
-            {/* ⚡ FIX: Removed z-0 */}
             <CardContent className="relative pt-4 pb-32 flex-1 px-2 md:px-6">
                 {isLoading ? <p className="text-center py-8 text-slate-400">Loading...</p> : (
                     <>
                         {visibleItems.length > 0 ? (
                             <Virtuoso
-                                style={{ height: '100%', minHeight: '400px' }}
+                                // ⚡ FIX: Removed minHeight constraint so footer (completed items) sits immediately below
+                                style={{ height: '100%' }}
                                 data={visibleItems}
                                 itemContent={(index, item) => {
                                     const hasPrice = item.price && item.price > 0;
-                                    // ⚡ UI HARMONIZATION: Matches Wishlist Card Style (rounded-xl, margin-bottom)
                                     return (
                                         <div
                                             key={item.id}
@@ -458,14 +461,36 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                                         </div>
                                     );
                                 }}
+                                // ⚡ FIX: Moved Accordion to Footer so it scrolls WITH the content and sits directly below items
                                 components={{
-                                    Footer: () => hasMore ? (
-                                        <div className="flex justify-center py-4">
-                                            <Button variant="outline" onClick={loadMore} className="gap-2 text-slate-500 border-slate-300">
-                                                <ArrowDownCircle className="w-4 h-4" /> Load More ({processedItems.length - visibleCount} left)
-                                            </Button>
+                                    Footer: () => (
+                                        <div className="pb-4">
+                                            {hasMore && (
+                                                <div className="flex justify-center py-4">
+                                                    <Button variant="outline" onClick={loadMore} className="gap-2 text-slate-500 border-slate-300">
+                                                        <ArrowDownCircle className="w-4 h-4" /> Load More ({processedItems.length - visibleCount} left)
+                                                    </Button>
+                                                </div>
+                                            )}
+                                            {completedItems.length > 0 && (
+                                                <Accordion type="single" collapsible className="mt-6 w-full">
+                                                    <AccordionItem value="completed" className="border-none">
+                                                        <AccordionTrigger className="text-slate-400 hover:text-slate-600 py-2 text-sm">Show Completed ({completedItems.length})</AccordionTrigger>
+                                                        <AccordionContent>
+                                                            <ul className="space-y-2 opacity-60">
+                                                                {completedItems.map((item) => (
+                                                                    <li key={item.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
+                                                                        <div className="flex items-center gap-3"><Checkbox checked={true} onCheckedChange={() => toggleComplete(item)} className="rounded-full" /><span className="line-through text-slate-500 text-sm">{item.name}</span></div>
+                                                                        <Button variant="ghost" size="icon" onClick={() => handleDeleteItem(item.id)} className="h-7 w-7"><Trash2 className="w-3.5 h-3.5 text-slate-400" /></Button>
+                                                                    </li>
+                                                                ))}
+                                                            </ul>
+                                                        </AccordionContent>
+                                                    </AccordionItem>
+                                                </Accordion>
+                                            )}
                                         </div>
-                                    ) : null
+                                    )
                                 }}
                             />
                         ) : (
@@ -473,26 +498,9 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                         )}
                     </>
                 )}
-
-                {completedItems.length > 0 && (
-                    <Accordion type="single" collapsible className="mt-6 w-full">
-                        <AccordionItem value="completed" className="border-none">
-                            <AccordionTrigger className="text-slate-400 hover:text-slate-600 py-2 text-sm">Show Completed ({completedItems.length})</AccordionTrigger>
-                            <AccordionContent>
-                                <ul className="space-y-2 opacity-60">
-                                    {completedItems.map((item) => (
-                                        <li key={item.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
-                                            <div className="flex items-center gap-3"><Checkbox checked={true} onCheckedChange={() => toggleComplete(item)} className="rounded-full" /><span className="line-through text-slate-500 text-sm">{item.name}</span></div>
-                                            <Button variant="ghost" size="icon" onClick={() => handleDeleteItem(item.id)} className="h-7 w-7"><Trash2 className="w-3.5 h-3.5 text-slate-400" /></Button>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </AccordionContent>
-                        </AccordionItem>
-                    </Accordion>
-                )}
             </CardContent>
 
+            {/* Portal FAB and Dialogs remain ... */}
             <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95" icon={Plus} />
 
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>

@@ -1,10 +1,10 @@
+//
 "use client"
 
 import { useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Capacitor } from "@capacitor/core"
-// ⚡ FIX: Import BarcodeFormat to solve the type error
 import { BarcodeScanner, BarcodeFormat } from '@capacitor-mlkit/barcode-scanning';
 
 import { Button } from "@/components/ui/button"
@@ -60,6 +60,17 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     if (joinError) throw joinError;
                 }
             }
+
+            // ⚡ FIX: Add delay and verification to prevent race condition where page.tsx queries too early
+            setLoading(true);
+            let retries = 5;
+            while (retries > 0) {
+                const { data: verify } = await supabase.from('household_members').select('id').eq('user_id', user.id).maybeSingle();
+                if (verify) break;
+                await new Promise(r => setTimeout(r, 800));
+                retries--;
+            }
+
             onHouseholdCreated(user);
 
         } catch (err: any) {
@@ -79,7 +90,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 const result = await BarcodeScanner.requestPermissions();
                 if (result.camera !== 'granted' && result.camera !== 'limited') return;
             }
-            // ⚡ FIX: Use BarcodeFormat.QrCode (Enum) instead of raw number 11
             const { barcodes } = await BarcodeScanner.scan({ formats: [BarcodeFormat.QrCode] });
             if (barcodes.length > 0 && barcodes[0].rawValue) {
                 setInviteCode(barcodes[0].rawValue);
