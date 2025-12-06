@@ -36,7 +36,7 @@ import { Household, List } from "@/lib/types"
 import { getCurrencySymbol, EXPENSE_CATEGORIES } from "@/lib/constants"
 import { compressImage } from "@/lib/utils"
 import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
-import toast, { Toaster } from 'react-hot-toast' // ⚡ IMPORT TOASTER
+import toast, { Toaster } from 'react-hot-toast'
 
 // --- TYPES ---
 type ListWithSummary = List & {
@@ -286,16 +286,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     useEffect(() => { fetchLists() }, [household.id, listType, refreshTrigger]);
 
-    // ⚡ DELAYED Explainer: Prevents flash on load
-    useEffect(() => {
-        let timer: NodeJS.Timeout;
-        if (!isLoading && lists.length === 0) {
-            timer = setTimeout(() => setShowExplainer(true), 1500); // 1.5s Delay
-        } else {
-            setShowExplainer(false);
-        }
-        return () => clearTimeout(timer);
-    }, [isLoading, lists.length]);
+    // ⚡ DELAYED Explainer REMOVED based on your request
 
     const handleUpdateList = (updated: List) => setLists(lists.map(l => l.id === updated.id ? { ...l, ...updated } : l));
     const handleDeleteList = async () => {
@@ -335,9 +326,14 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     if (selectedList) {
         return (
-            <div className="w-full animate-in slide-in-from-right-4 fade-in duration-300">
-                {/* ⚡ FIX G1: Updated button style to neutral */}
-                <Button variant="ghost" onClick={handleBack} className="mb-2 bg-slate-100/70 hover:bg-slate-100 text-slate-600 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm hover:shadow-md transition-all border border-slate-200">
+            // ⚡ FIX: Added z-index [50] to ensuring clickability above Dashboard
+            <div className="w-full animate-in slide-in-from-right-4 fade-in duration-300 relative z-[50]">
+                {/* ⚡ FIX G1: Updated button style to neutral & pointer-events */}
+                <Button
+                    variant="ghost"
+                    onClick={handleBack}
+                    className="mb-2 bg-slate-100/70 hover:bg-slate-100 text-slate-600 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm hover:shadow-md transition-all border border-slate-200 cursor-pointer pointer-events-auto"
+                >
                     <ArrowLeft className="w-4 h-4" /> Back to Lists
                 </Button>
                 {listType === 'wishlist' ? <ListDetail user={user} list={selectedList} currencySymbol={currencySymbol} /> : <ShoppingList user={user} list={selectedList} currencySymbol={currencySymbol} />}
@@ -346,7 +342,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     }
 
     const grandTotalCost = lists.reduce((s, l) => s + (l.estimated_cost || 0), 0);
-    const grandTotalItems = lists.reduce((s, l) => s + (l.pending_items || 0), 0); // Pending items is the best count we have
+    const grandTotalItems = lists.reduce((s, l) => s + (l.pending_items || 0), 0);
     const grandTotalGoals = lists.reduce((s, l) => s + (l.total_goals || 0), 0);
     const grandTotalTarget = lists.reduce((s, l) => s + (l.target_amount || 0), 0);
     const grandTotalSaved = lists.reduce((s, l) => s + (l.saved_amount || 0), 0);
@@ -491,7 +487,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                 </>
             )}
 
-            {/* ⚡ FIX I: Added DialogDescription */}
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete List?" description="This action cannot be undone." onConfirm={handleDeleteList} />
 
             {/* ⚡ EXPLAINER DIALOG (User can trigger manually) */}
@@ -500,7 +495,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                     <DialogHeader className="flex flex-col items-center">
                         <div className="bg-slate-50 p-4 rounded-full mb-4">{explainerContent.icon}</div>
                         <DialogTitle className="text-xl font-bold text-slate-800">{explainerContent.title}</DialogTitle>
-                        <DialogDescription>&nbsp;</DialogDescription> {/* FIX I */}
+                        <DialogDescription>&nbsp;</DialogDescription>
                     </DialogHeader>
                     <div className="text-left bg-slate-50/50 p-4 rounded-xl border border-slate-100">
                         {explainerContent.text}
