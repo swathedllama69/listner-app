@@ -26,7 +26,7 @@ import { Progress } from "@/components/ui/progress"
 import { Capacitor } from "@capacitor/core"
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
 import { Virtuoso } from 'react-virtuoso'
-import toast from 'react-hot-toast' // ⚡ SIMPLE IMPORT
+import toast from 'react-hot-toast'
 
 type ShoppingItem = {
     id: number; created_at: string; name: string; quantity: string | null;
@@ -37,6 +37,7 @@ type ShoppingItem = {
 
 const priorities = ['Low', 'Medium', 'High'];
 
+// ⚡ UI HARMONIZATION: Updated border logic to match Wishlist style
 const getPriorityBorderClass = (priority: string) => {
     switch (priority) {
         case 'High': return 'border-l-4 border-l-rose-500';
@@ -62,7 +63,6 @@ function PortalFAB({ onClick, className, icon: Icon }: any) {
 function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            {/* ⚡ FIX I: Added DialogDescription */}
             <DialogContent className="sm:max-w-sm rounded-2xl">
                 <DialogHeader><DialogTitle className="flex items-center gap-2"><Info className="w-5 h-5 text-lime-500" /> {title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
                 <DialogFooter><Button onClick={() => onOpenChange(false)} className="w-full">OK</Button></DialogFooter>
@@ -74,7 +74,6 @@ function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boo
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            {/* ⚡ FIX I: Added DialogDescription */}
             <DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2 text-rose-600"><AlertTriangle className="w-5 h-5" /> {title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader><DialogFooter className="flex gap-2 sm:justify-end"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button></DialogFooter></DialogContent>
         </Dialog>
     )
@@ -265,7 +264,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             try {
                 const { data, error } = await supabase.from("shopping_items").insert(newItemPayload).select().single();
                 if (error) throw error;
-                // ⚡ FIX: Find and replace temp item
                 setItems(prev => prev.map(i => i.id === tempItem.id ? data as ShoppingItem : i).filter(i => i.id !== tempItem.id));
                 const updatedItems = items.map(i => i.id === tempItem.id ? data as ShoppingItem : i).filter(i => i.id !== tempItem.id);
                 saveToCache(CACHE_KEYS.SHOPPING_LIST(list.id), [data as ShoppingItem, ...updatedItems]);
@@ -342,8 +340,9 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const formQty = parseInt(form.quantity) || 1;
     const formTotal = formPrice * formQty;
 
+    // ⚡ FIX: Added z-20 to ensure card sits above other layers
     return (
-        <Card className={`w-full rounded-2xl shadow-xl bg-white/80 backdrop-blur-sm relative border-none min-h-[80vh] flex flex-col`}>
+        <Card className={`w-full rounded-2xl shadow-xl bg-white/80 backdrop-blur-sm relative border-none min-h-[80vh] flex flex-col z-20`}>
             {/* Header Section */}
             <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
@@ -353,7 +352,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                         <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>{listSettings.isPrivate ? 'Private' : 'Shared'}</span>
                         {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
                     </div>
-                    {/* ⚡ FIX G2: Updated label for clarity */}
                     <p className="text-xs text-slate-400 font-medium flex items-center gap-2">
                         <ShoppingBag className="w-3 h-3" /> {items.length} total items
                         <span className="w-1 h-1 bg-slate-500 rounded-full"></span>
@@ -410,7 +408,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 </div>
             </div>
 
-            {/* ⚡ FIX D: Removed z-0 from CardContent to fix unclickable area */}
+            {/* ⚡ FIX: Removed z-0 */}
             <CardContent className="relative pt-4 pb-32 flex-1 px-2 md:px-6">
                 {isLoading ? <p className="text-center py-8 text-slate-400">Loading...</p> : (
                     <>
@@ -420,10 +418,11 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                                 data={visibleItems}
                                 itemContent={(index, item) => {
                                     const hasPrice = item.price && item.price > 0;
+                                    // ⚡ UI HARMONIZATION: Matches Wishlist Card Style (rounded-xl, margin-bottom)
                                     return (
                                         <div
                                             key={item.id}
-                                            className={`group flex justify-between items-center p-2 mb-2 border-b border-slate-100 bg-white hover:bg-slate-50 transition-all ${getPriorityBorderClass(item.priority)} ${item.is_pending ? 'opacity-70' : ''}`}
+                                            className={`group flex justify-between items-center p-3 mb-2 rounded-xl border border-slate-100 bg-white hover:border-slate-300 transition-all ${getPriorityBorderClass(item.priority)} ${item.is_pending ? 'opacity-70' : ''}`}
                                         >
                                             <div className="flex items-center gap-3 flex-1 min-w-0">
                                                 <span className="text-xs font-bold text-black w-5 text-center">{index + 1}.</span>
@@ -494,11 +493,11 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 )}
             </CardContent>
 
-            <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} />
+            <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95" icon={Plus} />
 
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl top-[20%] translate-y-0">
-                    <DialogHeader><DialogTitle>Add Shopping Item</DialogTitle><DialogDescription>Add a new item to your shopping list.</DialogDescription></DialogHeader> {/* FIX I */}
+                    <DialogHeader><DialogTitle>Add Shopping Item</DialogTitle><DialogDescription>Add a new item to your shopping list.</DialogDescription></DialogHeader>
                     <div className="bg-lime-50 border border-lime-100 p-3 rounded-lg text-xs text-lime-800 flex gap-2 items-start mb-2"><Lightbulb className="w-4 h-4 shrink-0 mt-0.5" /><div>Add items here. If you enter a price and quantity, the total cost will be calculated automatically.</div></div>
                     <form onSubmit={handleAddItem} className="space-y-4">
                         <div className="grid grid-cols-4 gap-3"><div className="col-span-3"><Label>Item Name</Label><Input ref={inputRef} value={form.name} onChange={handleFormChange} name="name" className="h-12 text-lg" autoFocus autoComplete="off" /></div><div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={handleFormChange} name="quantity" className="h-12 text-center" autoComplete="off" /></div></div>
@@ -518,7 +517,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
             <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}>
                 <DialogContent className="sm:max-w-sm rounded-2xl">
-                    <DialogHeader><DialogTitle>Rename List</DialogTitle><DialogDescription>Enter a new name for your list.</DialogDescription></DialogHeader> {/* FIX I */}
+                    <DialogHeader><DialogTitle>Rename List</DialogTitle><DialogDescription>Update the name of this shopping list.</DialogDescription></DialogHeader>
                     <div className="flex gap-2 py-2"><Input value={listSettings.name} onChange={e => setListSettings({ ...listSettings, name: e.target.value })} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div>
                 </DialogContent>
             </Dialog>
@@ -538,7 +537,7 @@ function EditShoppingItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
     const handleSubmit = (e: FormEvent) => { e.preventDefault(); onUpdate(form); };
     return (
         <DialogContent className="sm:max-w-md rounded-2xl">
-            <DialogHeader><DialogTitle>Edit Item</DialogTitle><DialogDescription>Modify the details of this shopping item.</DialogDescription></DialogHeader> {/* FIX I */}
+            <DialogHeader><DialogTitle>Edit Item</DialogTitle><DialogDescription>Update the details for this item.</DialogDescription></DialogHeader>
             <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="grid grid-cols-4 gap-3">
                     <div className="col-span-3"><Label>Item Name</Label><Input value={form.name} onChange={handleChange} name="name" className="h-11" autoComplete="off" /></div>

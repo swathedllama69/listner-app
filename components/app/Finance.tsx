@@ -25,13 +25,14 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
 import { EXPENSE_CATEGORIES } from "@/lib/constants"
-import toast, { Toaster } from 'react-hot-toast' // ⚡ SIMPLE TOAST IMPORT
+import { Capacitor } from "@capacitor/core"
+import { Share } from "@capacitor/share"
+import toast, { Toaster } from 'react-hot-toast'
 
 type HouseholdMember = { user_id: string; email: string }
 type Expense = { id: number; name: string; amount: number; category: string; user_id: string; notes: string | null; expense_date: string; scope: 'household' | 'personal' }
 type Credit = { id: number; amount: number; notes: string | null; is_settled: boolean; lender_user_id: string | null; lender_name: string; borrower_user_id: string | null; borrower_name: string; created_at: string; scope: 'household' | 'personal' }
 
-// ⚡ CATEGORY ICON MAPPING
 const CATEGORY_ICONS: Record<string, any> = {
     "Groceries": { icon: ShoppingBasket, color: "text-emerald-600", bg: "bg-emerald-100" },
     "Transport": { icon: Car, color: "text-blue-600", bg: "bg-blue-100" },
@@ -49,17 +50,30 @@ const getCategoryIcon = (category: string) => {
     return <div className={`h-8 w-8 rounded-full flex items-center justify-center ${config.bg} ${config.color}`}><Icon className="w-4 h-4" /></div>;
 }
 
-const downloadCSV = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    if (link.download !== undefined) {
-        const url = URL.createObjectURL(blob);
-        link.setAttribute("href", url);
-        link.setAttribute("download", filename);
-        link.style.visibility = 'hidden';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+// ⚡ UPDATED EXPORT LOGIC
+const exportData = async (content: string, filename: string) => {
+    if (Capacitor.isNativePlatform()) {
+        try {
+            await Share.share({
+                title: filename,
+                text: content,
+                dialogTitle: 'Export CSV',
+            });
+        } catch (e) {
+            toast.error("Share failed");
+        }
+    } else {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
     }
 }
 
@@ -69,7 +83,7 @@ function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: 
             <DialogContent className="sm:max-w-sm rounded-2xl">
                 <DialogHeader>
                     <DialogTitle>{title}</DialogTitle>
-                    <DialogDescription>{description}</DialogDescription> {/* FIX I */}
+                    <DialogDescription>{description}</DialogDescription>
                 </DialogHeader>
                 <DialogFooter className="flex gap-2 sm:justify-end">
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -84,30 +98,33 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     const [members, setMembers] = useState<HouseholdMember[]>([])
     const [expenses, setExpenses] = useState<Expense[]>([])
     const [credits, setCredits] = useState<Credit[]>([])
-    const [isLoading, setIsLoading] = useState(true) // ⚡ ADDED STATE
+    const [isLoading, setIsLoading] = useState(true)
 
     useEffect(() => {
         async function fetchFinanceData() {
             setIsLoading(true);
 
-            // ⚡ FIX F: RLS/Join workaround not implemented as syntax is correct, relying on RLS/schema being correct.
-            const { data: memberData, error: memberError } = await supabase.from('household_members').select('user_id, profiles(email)').eq('household_id', household.id);
+            // ⚡ BULLET-PROOF API FIX: Split query to avoid foreign key errors
+            try {
+                // 1. Get Members
+                const { data: memberIds } = await supabase.from('household_members').select('user_id').eq('household_id', household.id);
 
-            if (memberError) {
-                console.error("Member data fetch failed (400?):", memberError);
-                // Fallback: fetch members without join if join fails
-                const { data: fallbackData } = await supabase.from('household_members').select('user_id').eq('household_id', household.id);
-                if (fallbackData) {
-                    setMembers(fallbackData.map((m: any) => ({ user_id: m.user_id, email: m.user_id === user.id ? user.email || 'You' : 'Partner' })));
+                if (memberIds && memberIds.length > 0) {
+                    const ids = memberIds.map(m => m.user_id);
+                    // 2. Get Profiles
+                    const { data: profiles } = await supabase.from('profiles').select('id, email').in('id', ids);
+
+                    if (profiles) {
+                        const mappedMembers = profiles.map(p => ({
+                            user_id: p.id,
+                            email: p.email || 'Partner'
+                        }));
+                        setMembers(mappedMembers);
+                    }
                 }
-            } else if (memberData) {
-                const mappedMembers = memberData.map((m: any) => ({
-                    user_id: m.user_id,
-                    email: m.profiles?.email || 'Partner'
-                }));
-                setMembers(mappedMembers);
+            } catch (e) {
+                console.error("Member fetch failed", e);
             }
-
 
             const { data: expenseData } = await supabase.from('expenses').select('*').eq('household_id', household.id).order('expense_date', { ascending: false });
             if (expenseData) setExpenses(expenseData as Expense[]);
@@ -115,7 +132,7 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
             const { data: creditData } = await supabase.from('credits').select('*').eq('household_id', household.id).order('is_settled', { ascending: true }).order('created_at', { ascending: false });
             if (creditData) setCredits(creditData as Credit[]);
 
-            setIsLoading(false); // ⚡ SET LOADING FALSE
+            setIsLoading(false);
         }
         fetchFinanceData();
 
@@ -156,13 +173,13 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     const handleExportExpenses = () => {
         const headers = ["Date", "Item", "Category", "Amount", "Notes", "User", "Scope"];
         const rows = visibleExpenses.map(e => [new Date(e.expense_date).toLocaleDateString(), `"${e.name.replace(/"/g, '""')}"`, e.category, e.amount, `"${(e.notes || '').replace(/"/g, '""')}"`, e.user_id === user.id ? "Me" : "Partner", e.scope]);
-        downloadCSV([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Expenses_${new Date().toISOString().split('T')[0]}.csv`);
+        exportData([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Expenses_${new Date().toISOString().split('T')[0]}.csv`);
     }
 
     const handleExportDebts = () => {
         const headers = ["Date", "Status", "Amount", "Lender", "Borrower", "Note", "Scope"];
         const rows = visibleCredits.map(c => [new Date(c.created_at).toLocaleDateString(), c.is_settled ? "Settled" : "Active", c.amount, c.lender_name, c.borrower_name, `"${(c.notes || '').replace(/"/g, '""')}"`, c.scope]);
-        downloadCSV([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Debts_${new Date().toISOString().split('T')[0]}.csv`);
+        exportData([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Debts_${new Date().toISOString().split('T')[0]}.csv`);
     }
 
     const activeCredits = visibleCredits.filter(c => !c.is_settled);
@@ -177,7 +194,7 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
         <TooltipProvider>
             <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
                 <div className="px-4 pt-2 pb-4">
-                    {/* ⚡ FIX H1: Card rounding changed to rounded-xl */}
+                    {/* ⚡ FIX H1: Changed rounded-2xl to rounded-xl */}
                     <div className={`rounded-xl px-6 py-3 flex items-center justify-between shadow-md ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
                         <div className="flex flex-col">
                             <span className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest">Net Position</span>
@@ -292,12 +309,13 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances,
                     </CardContent>
                 </Card>
 
-                <Card className="rounded-xl border-none shadow-md bg-cyan-600 text-white h-28 flex flex-col justify-center relative overflow-hidden">
+                {/* ⚡ COLOR CHANGE: Updated to purple-600 */}
+                <Card className="rounded-xl border-none shadow-md bg-purple-600 text-white h-28 flex flex-col justify-center relative overflow-hidden">
                     <div className="absolute right-2 top-2 opacity-20"><Lightbulb className="w-8 h-8" /></div>
-                    <CardHeader className="p-3 pb-0"><CardTitle className="text-[10px] font-bold text-cyan-100 uppercase">Top Spending</CardTitle></CardHeader>
+                    <CardHeader className="p-3 pb-0"><CardTitle className="text-[10px] font-bold text-purple-100 uppercase">Top Spending</CardTitle></CardHeader>
                     <CardContent className="p-3 pt-1 flex flex-col justify-center gap-1.5 h-full">
                         {top3Categories.length === 0 ? (
-                            <p className="text-xs text-cyan-100 opacity-70">No data yet</p>
+                            <p className="text-xs text-purple-100 opacity-70">No data yet</p>
                         ) : (
                             top3Categories.map((item, idx) => {
                                 const percent = totalExpenses > 0 ? (item.amount / totalExpenses) * 100 : 0;
@@ -307,8 +325,8 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances,
                                             <span className="truncate max-w-[80px]">{item.category}</span>
                                             <span>{Math.round(percent)}%</span>
                                         </div>
-                                        <div className="w-full h-1.5 bg-cyan-800/30 rounded-full overflow-hidden">
-                                            <div className="h-full bg-cyan-200" style={{ width: `${percent}%` }}></div>
+                                        <div className="w-full h-1.5 bg-purple-800/30 rounded-full overflow-hidden">
+                                            <div className="h-full bg-purple-200" style={{ width: `${percent}%` }}></div>
                                         </div>
                                     </div>
                                 )
@@ -365,7 +383,7 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
     const handleExport = () => {
         const headers = ["Date", "Item", "Category", "Amount", "Notes", "User", "Scope"];
         const rows = expenses.map(e => [new Date(e.expense_date).toLocaleDateString(), `"${e.name.replace(/"/g, '""')}"`, e.category, e.amount, `"${(e.notes || '').replace(/"/g, '""')}"`, e.user_id === user.id ? "Me" : "Partner", e.scope]);
-        downloadCSV([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Expenses_History.csv`);
+        exportData([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Expenses_History.csv`);
     }
 
     const formPrice = parseFloat(form.price) || 0;
@@ -454,7 +472,6 @@ function ExpensesList({ user, household, members, expenses, setExpenses, currenc
     const totalPages = Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE);
     const paginatedExpenses = filteredExpenses.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 
-    // ⚡ SKELETON LOADER
     const ExpenseSkeleton = () => (
         <div className="space-y-3">
             {[...Array(5)].map((_, i) => (
@@ -585,7 +602,7 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         e.stopPropagation();
         const headers = ["Date", "Status", "Amount", "Lender", "Borrower", "Note", "Scope"];
         const rows = credits.map(c => [new Date(c.created_at).toLocaleDateString(), c.is_settled ? "Settled" : "Active", c.amount, c.lender_name, c.borrower_name, `"${(c.notes || '').replace(/"/g, '""')}"`, c.scope]);
-        downloadCSV([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Debts_History.csv`);
+        exportData([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Debts_History.csv`);
     }
 
     const handleAction = async () => {
@@ -607,9 +624,8 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
         let lenderName = isOweMe ? 'Me' : form.personName; let borrowerName = !isOweMe ? 'Me' : form.personName;
 
-        let finalScope = 'personal'; // ⚡ NEW DEFAULT: Assume personal unless explicitly tied to partner
+        let finalScope = 'personal';
 
-        // Check if there's a partner and if the name field is empty/default (implying system partner debt)
         const isPartnerDebt = partnerId && !isSingleUser && form.personName.toLowerCase() === 'partner';
 
         if (isPartnerDebt) {
@@ -617,15 +633,12 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
             if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
             else { lenderId = partnerId; lenderName = 'Partner'; }
         } else if (partnerId && !isSingleUser && !form.personName) {
-            // No name entered, auto-assume partner in a two-user household
             finalScope = 'household';
             if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
             else { lenderId = partnerId; lenderName = 'Partner'; }
         } else if (form.personName) {
-            // Custom name entered, this is a personal debt (scope is already 'personal')
             finalScope = 'personal';
         } else {
-            // Default personal debt (no name, no partner assumed)
             finalScope = 'personal';
         }
 
@@ -654,25 +667,20 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
         let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
         let lenderName = isOweMe ? 'Me' : updated.personName; let borrowerName = !isOweMe ? 'Me' : updated.personName;
 
-        let finalScope = updated.scope; // Keep existing scope unless explicitly changed
+        let finalScope = updated.scope;
 
-        // ⚡ NEW FINANCE LOGIC: Check if the user is forcing this to be a partner debt via the name field (or it was already one)
         const isPartnerDebt = partnerId && !isSingleUser && (updated.personName.toLowerCase() === 'partner' || editingCredit.scope === 'household');
 
         if (isPartnerDebt) {
             finalScope = 'household';
-            // Only assign system IDs if the name is 'Partner' or if it was an existing household debt
             if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
             else { lenderId = partnerId; lenderName = 'Partner'; }
         } else {
-            // Custom name or solo/non-partner debt
             finalScope = 'personal';
-            // Clear system IDs if a custom name is used for a personal debt
             if (isOweMe) { borrowerId = null; borrowerName = updated.personName; }
             else { lenderId = null; lenderName = updated.personName; }
         }
 
-        // Always ensure one of the IDs is the current user if the opposite is null
         if (!lenderId && !borrowerId) {
             if (isOweMe) lenderId = user.id; else borrowerId = user.id;
         }
@@ -715,7 +723,6 @@ function CreditsList({ user, household, members, credits, setCredits, currencySy
                         <form onSubmit={handleAddCredit} className="space-y-3 pt-2">
                             <div className="grid grid-cols-2 gap-3"><Button type="button" variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button><Button type="button" variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button></div><div className="grid grid-cols-2 gap-3">
                                 <Input type="number" placeholder={`Amount (${currencySymbol})`} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required className="bg-white h-10" />
-                                {/* ⚡ NEW FINANCE LOGIC: Allow custom name, disable if auto-partner is assumed */}
                                 <Input placeholder={partnerId && !isSingleUser && !form.personName ? "Partner (Default)" : "Name (e.g. Bank)"} value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} className="bg-white h-10" />
                             </div><Input placeholder="What for? (e.g. Dinner)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-white h-10" /><Button type="submit" className="w-full bg-slate-900 text-white h-11 font-bold">Log Debt</Button>
                         </form>
@@ -792,10 +799,8 @@ function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, cur
         scope: credit.scope
     });
 
-    // Determine if this is a system-linked debt that we should auto-fill the name for, but still allow manual override.
     const isSystemLinked = (credit.lender_user_id === userId && credit.borrower_user_id === partnerId) || (credit.borrower_user_id === userId && credit.lender_user_id === partnerId);
 
-    // Set placeholder based on system link status
     const namePlaceholder = isSystemLinked ? "Partner (Linked)" : "Name (e.g. Bank)";
 
     return (
@@ -814,7 +819,6 @@ function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, cur
             </div>
             <div>
                 <Label>Person / Entity</Label>
-                {/* ⚡ NEW FINANCE LOGIC: Allow manual change, with system hint */}
                 <Input value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} placeholder={namePlaceholder} />
                 {isSystemLinked && <p className="text-[10px] text-slate-400 mt-1">This is automatically linked to your Partner's profile.</p>}
             </div>

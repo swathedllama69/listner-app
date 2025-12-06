@@ -299,7 +299,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     }
 
     return (
-        <div className={`space-y-6 pb-32`}>
+        <div className={`space-y-6 pb-32 relative z-20`}>
             {/* MATCHING SHOPPING LIST HEADER STYLE */}
             <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>

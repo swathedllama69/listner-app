@@ -1,9 +1,9 @@
 "use client"
 
 import { useState, useRef } from "react"
-import { supabase } from "@/lib/supabase" // ⚡ REAL IMPORT
-import { User } from "@supabase/supabase-js" // ⚡ REAL TYPE IMPORT
-import { Capacitor } from "@capacitor/core" // ⚡ REAL CAPACITOR IMPORT
+import { supabase } from "@/lib/supabase"
+import { User } from "@supabase/supabase-js"
+import { Capacitor } from "@capacitor/core"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,9 +14,8 @@ import {
     CheckCircle2, ChevronLeft, Plus, Sparkles, QrCode, MapPin
 } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { compressImage } from "@/lib/utils" //
+import { compressImage } from "@/lib/utils"
 
-// --- CONSTANTS ---
 const COUNTRIES = ["Nigeria", "United States", "United Kingdom", "Canada", "Ghana", "South Africa", "Kenya"];
 const CURRENCIES = [
     { code: "NGN", symbol: "₦", name: "Nigerian Naira" },
@@ -26,8 +25,7 @@ const CURRENCIES = [
     { code: "CAD", symbol: "C$", name: "Canadian Dollar" }
 ];
 
-// --- MOCK SCANNER (Keep this unless you have @capacitor-community/barcode-scanner installed) ---
-// If you have the real plugin, replace this block with the real import.
+// Mock Scanner for Web/Testing
 const BarcodeScanner = {
     checkPermissions: async () => ({ camera: 'granted' }),
     requestPermissions: async () => ({ camera: 'granted' }),
@@ -89,7 +87,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 if (memError) throw memError;
 
                 setCurrentHouseholdId(hh.id);
-                setView('profile_setup'); // Advance to profile setup
+                setView('profile_setup');
 
             } else {
                 if (!codeToUse) throw new Error("Missing invite code");
@@ -110,7 +108,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     if (joinError) throw joinError;
                 }
                 setCurrentHouseholdId(hh.id);
-                // ⚡ FIX B: Advance to profile setup to complete onboarding flags
                 setView('profile_setup');
             }
         } catch (err: any) {
@@ -119,43 +116,51 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         } finally { setLoading(false); }
     };
 
-    // --- STEP 2: AVATAR & NAME SAVE ---
+    // --- STEP 2: PROFILE LOGIC ---
     const handleProfileContinue = async () => {
         if (!displayName.trim()) return;
         setView('currency_setup');
     }
 
-
     // --- STEP 3: FINAL SUBMISSION ---
     const handleFinalSubmit = async () => {
         setLoading(true);
         if (!currentHouseholdId) {
-            setError("Error: Missing household ID. Please restart the process.");
+            setError("Error: Missing household ID. Please restart.");
             setLoading(false);
             return;
         }
 
         try {
-            // 1. Update Auth Metadata and Profiles table with latest display name/avatar
-            await supabase.auth.updateUser({
+            // 1. CRITICAL FIX: Capture the UPDATED user object from Supabase
+            // This object contains the new metadata (name, avatar, onboarding_complete)
+            const { data: authData, error: authError } = await supabase.auth.updateUser({
                 data: { full_name: displayName, avatar_url: avatarUrl, onboarding_complete: true }
             });
 
-            // 2. Update/Insert Profile
+            if (authError) throw authError;
+
+            // If authData.user is null for some reason, fallback to current 'user', but this shouldn't happen on success.
+            const updatedUser = authData.user || user;
+
+            // 2. Update Profiles Table
             const { data: profileData, error: profileError } = await supabase.from('profiles').update({
-                full_name: displayName, avatar_url: avatarUrl, has_seen_tutorial: false // Resetting tutorial ensures page.tsx correctly routes to TUTORIAL stage
+                full_name: displayName, avatar_url: avatarUrl, has_seen_tutorial: false
             }).eq('id', user.id).select();
 
             if (profileError || !profileData || profileData.length === 0) {
                 await supabase.from('profiles').insert({ id: user.id, full_name: displayName, avatar_url: avatarUrl, email: user.email, username: user.email?.split('@')[0], has_seen_tutorial: false });
             }
 
-            // 3. Update Household Currency/Country (Only needed if created, but safe to update if joined too)
+            // 3. Update Household
             await supabase.from('households').update({ country, currency }).eq('id', currentHouseholdId);
 
-            // 4. Trigger reload of user data in parent component
-            await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for DB consistency
-            onHouseholdCreated(user);
+            // 4. Pass the FRESH updatedUser back to parent
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // ✅ THIS IS THE FIX: Passing 'updatedUser' instead of 'user'
+            onHouseholdCreated(updatedUser as User);
+
         } catch (e: any) {
             console.error(e);
             setError("Setup Failed: " + e.message);
@@ -184,8 +189,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
 
     const handleScan = async () => {
         if (!Capacitor.isNativePlatform()) {
-            // ⚡ REMOVED MOCK CODE REDIRECT
-            // handleHouseholdSubmit("MOCK_CODE_123");
             alert("QR Code scanner is only available on the native app.");
             return;
         }
@@ -287,7 +290,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         return (
             <div className="relative flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 overflow-hidden">
                 <AnimatedBackground />
-                {/* ⚡ FIX A: Profile setup no longer automatically advances. Must click continue. */}
                 <Card className="relative z-10 w-full max-w-sm border-none shadow-2xl bg-white/95 backdrop-blur rounded-[2rem] p-8 space-y-8 animate-in zoom-in-95 duration-500">
                     <div className="text-center mt-8"><h1 className="text-2xl font-bold text-slate-900">One last thing</h1><p className="text-slate-500 mt-2 text-sm font-medium">Add a photo so others know it's you.</p></div>
                     <div className="flex justify-center"><div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}><div className="h-32 w-32 rounded-full bg-slate-50 border-4 border-white shadow-xl overflow-hidden flex items-center justify-center transition-all group-hover:scale-105">{avatarUrl ? <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <UserIcon className="w-12 h-12 text-slate-300" />}{uploading && <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm"><Loader2 className="w-8 h-8 text-white animate-spin" /></div>}</div><div className="absolute bottom-1 right-1 bg-slate-900 text-white p-2.5 rounded-full border-4 border-white shadow-lg group-hover:bg-lime-600 transition-colors"><Camera className="w-5 h-5" /></div></div><input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} /></div>

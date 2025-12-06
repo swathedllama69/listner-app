@@ -5,7 +5,7 @@ import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Household } from "@/lib/types"
-import { ArrowRightLeft, ShoppingCart, PiggyBank, Loader2, Wallet, ArrowUp, ArrowDown, CloudOff } from "lucide-react"
+import { ArrowRightLeft, ShoppingCart, PiggyBank, Loader2, Wallet, ArrowUp, ArrowDown, CloudOff, PieChart } from "lucide-react"
 import { Progress } from "@/components/ui/progress"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -53,7 +53,6 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
     })
     const [allExpenses, setAllExpenses] = useState<any[]>([]); // Raw expenses for flexible charting
 
-    // ⚡ CHANGED: Removed delay for Offline Indicator
     useEffect(() => {
         setShowOfflineIndicator(usingCachedData);
     }, [usingCachedData]);
@@ -153,7 +152,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                 const d = new Date(e.expense_date);
                 return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
             });
-            if (filtered.length === 0) filtered = allExpenses; // Fallback
+            // ⚡ FIX: Removed the automatic fallback. If empty, it stays empty.
         } else if (categoryFilter === 'last_month') {
             filtered = allExpenses.filter(e => {
                 const d = new Date(e.expense_date);
@@ -202,7 +201,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
 
     return (
         <TooltipProvider>
-            <div className={`space-y-4 transition-opacity duration-500 ${usingCachedData ? 'opacity-90' : 'opacity-100'}`}>
+            <div className={`space-y-4 transition-opacity duration-500 pb-20 ${usingCachedData ? 'opacity-90' : 'opacity-100'}`}>
 
                 {showOfflineIndicator && (
                     <div className="flex justify-end px-1 animate-in fade-in slide-in-from-top-2 duration-500">
@@ -215,7 +214,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                 {/* STATS GRID */}
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     {/* CARD 1: BALANCE */}
-                    <Card className={`rounded-2xl shadow-sm border border-slate-100 group relative overflow-hidden ${isBalanced ? '' : (netPositive ? 'hover:border-emerald-200' : 'hover:border-rose-200')}`}>
+                    <Card className={`rounded-xl shadow-sm border border-slate-100 group relative overflow-hidden ${isBalanced ? '' : (netPositive ? 'hover:border-emerald-200' : 'hover:border-rose-200')}`}>
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-1 relative z-10">
                             <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Net Balance</CardTitle>
                             <div className={`p-1.5 rounded-lg ${isBalanced ? 'bg-slate-50 text-slate-400' : (netPositive ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600')}`}>
@@ -224,7 +223,6 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                         </CardHeader>
                         <CardContent className="p-4 pt-1 relative z-10">
                             <div className={`text-2xl font-bold tracking-tight ${isBalanced ? 'text-emerald-600' : (netPositive ? 'text-emerald-700' : 'text-rose-700')}`}>
-                                {/* FIX: Show 0 instead of Settled text, handle hidden balances */}
                                 {hideBalances ? '****' : (isBalanced ? `${currencySymbol}0` : (netPositive ? '+' : '-') + currencySymbol + Math.abs(stats.netBalance).toLocaleString())}
                             </div>
                             {!isBalanced && (
@@ -237,9 +235,8 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                     </Card>
 
                     {/* CARD 2: SPENDING */}
-                    <Card className="rounded-2xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-indigo-200">
+                    <Card className="rounded-xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-indigo-200">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-1 relative z-10">
-                            {/* ⚡ CHANGED: Added "Spend" suffix to title */}
                             <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{currentMonthName} Spend</CardTitle>
                             <div className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600">
                                 <Wallet className="h-3.5 w-3.5" />
@@ -256,7 +253,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                     </Card>
 
                     {/* CARD 3: SHOPPING */}
-                    <Card className="rounded-2xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-sky-200">
+                    <Card className="rounded-xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-sky-200">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-1 relative z-10">
                             <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Shopping</CardTitle>
                             <div className="p-1.5 rounded-lg bg-sky-50 text-sky-600">
@@ -270,7 +267,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                     </Card>
 
                     {/* CARD 4: GOALS */}
-                    <Card className="rounded-2xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-purple-200">
+                    <Card className="rounded-xl shadow-sm border border-slate-100 group relative overflow-hidden hover:border-purple-200">
                         <CardHeader className="flex flex-row items-center justify-between space-y-0 p-4 pb-1 relative z-10">
                             <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Goals</CardTitle>
                             <div className="p-1.5 rounded-lg bg-purple-50 text-purple-600">
@@ -295,7 +292,7 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
 
                 {/* CHARTS */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-                    <Card className="rounded-2xl border border-slate-100 p-5 hover:shadow-sm transition-all bg-white">
+                    <Card className="rounded-xl border border-slate-100 p-5 hover:shadow-sm transition-all bg-white flex flex-col">
                         <div className="flex items-center justify-between mb-4">
                             <CardTitle className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2">
                                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span> Expense Breakdown
@@ -313,12 +310,20 @@ export function HomeOverview({ user, household, currencySymbol, hideBalances, re
                                 </SelectContent>
                             </Select>
                         </div>
-                        <div className="w-full">
-                            <CategoryDonutChart data={categoryData} currencySymbol={currencySymbol} />
+                        <div className="w-full flex-1 flex items-center justify-center min-h-[200px]">
+                            {/* ⚡ LOGIC: Handle empty data explicitly */}
+                            {categoryData.length > 0 ? (
+                                <CategoryDonutChart data={categoryData} currencySymbol={currencySymbol} />
+                            ) : (
+                                <div className="text-center text-slate-400 flex flex-col items-center">
+                                    <div className="bg-slate-50 p-3 rounded-full mb-2"><PieChart className="w-6 h-6 opacity-20" /></div>
+                                    <p className="text-xs font-medium">No expenses for this period</p>
+                                </div>
+                            )}
                         </div>
                     </Card>
 
-                    <Card className="lg:col-span-2 rounded-2xl border border-slate-100 p-5 hover:shadow-sm transition-all bg-white">
+                    <Card className="lg:col-span-2 rounded-xl border border-slate-100 p-5 hover:shadow-sm transition-all bg-white">
                         {/* Note: MonthlyTrendChart handles its own internal filtering state */}
                         <MonthlyTrendChart rawData={dailyTrendData} currencySymbol={currencySymbol} />
                     </Card>
