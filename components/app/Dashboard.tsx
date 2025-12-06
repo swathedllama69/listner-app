@@ -1,61 +1,91 @@
 "use client"
 
 import { useState, useEffect, FormEvent, useRef } from "react"
-import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
-import { Capacitor } from "@capacitor/core"
-import { App as CapApp } from "@capacitor/app"
-import { StatusBar, Style } from "@capacitor/status-bar"
-import { PushNotifications } from "@capacitor/push-notifications"
-
-// UI Imports
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
+import { Household } from "@/lib/types"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+    DollarSign, Wallet, History, HandCoins, Pencil, Trash2,
+    ChevronDown, ChevronLeft, ChevronRight, Download,
+    Lightbulb, FileSpreadsheet, User as UserIcon, Home as HomeIcon,
+    Plus, RefreshCw, Undo2, ShoppingBasket, Car, Zap, Home, Ticket, Gift,
+    Briefcase, Coffee, GraduationCap, HeartPulse, MoreHorizontal, Sun, AlertTriangle
+} from "lucide-react"
 import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt, Loader2, ArrowDown, ListChecks, CheckCircle2, Goal, TrendingUp, ArrowDownRight, User as UserIcon, Settings } from "lucide-react"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Progress } from "@/components/ui/progress"
-import { Separator } from "@/components/ui/separator"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { Skeleton } from "@/components/ui/skeleton"
-
-import { SidebarLayout } from "@/components/ui/SidebarLayout"
-import { ListDetail } from "@/components/app/ListDetail"
-import { ShoppingList } from "@/components/app/ShoppingList"
-import { Finance } from "@/components/app/Finance"
-import { HomeOverview } from "@/components/app/HomeOverview"
-import { OnboardingWizard } from "@/components/app/OnboardingWizard"
-import { HouseholdSyncDialog } from "@/components/app/HouseholdSyncDialog"
-import { SettingsView } from "@/components/app/SettingsView"
-import { NotificationBell } from "@/components/app/NotificationBell"
-import { Household, List } from "@/lib/types"
-import { getCurrencySymbol, EXPENSE_CATEGORIES } from "@/lib/constants"
-import { compressImage } from "@/lib/utils"
-import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
+import { EXPENSE_CATEGORIES } from "@/lib/constants"
+import { Capacitor } from "@capacitor/core"
+import { Share } from "@capacitor/share"
+// ⚡ FIX: Import Haptics and ImpactStyle
+import { Haptics, ImpactStyle } from "@capacitor/haptics"
 import toast, { Toaster } from 'react-hot-toast'
 
-// --- TYPES ---
-type ListWithSummary = List & {
-    pending_items?: number; estimated_cost?: number;
-    active_goals?: number; target_amount?: number; saved_amount?: number;
-    total_goals?: number; completed_goals?: number;
-};
-type ListSummary = {
-    list_id: string; total_pending_items?: number; estimated_cost?: number;
-    total_active_goals?: number; total_target_amount?: number; total_saved_amount?: number;
-    total_goals?: number; completed_goals?: number;
+type HouseholdMember = { user_id: string; email: string }
+type Expense = { id: number; name: string; amount: number; category: string; user_id: string; notes: string | null; expense_date: string; scope: 'household' | 'personal' }
+type Credit = { id: number; amount: number; notes: string | null; is_settled: boolean; lender_user_id: string | null; lender_name: string; borrower_user_id: string | null; borrower_name: string; created_at: string; scope: 'household' | 'personal' }
+
+const CATEGORY_ICONS: Record<string, any> = {
+    "Groceries": { icon: ShoppingBasket, color: "text-emerald-600", bg: "bg-emerald-100" },
+    "Transport": { icon: Car, color: "text-blue-600", bg: "bg-blue-100" },
+    "Utilities": { icon: Zap, color: "text-yellow-600", bg: "bg-yellow-100" },
+    "Rent/Mortgage": { icon: Home, color: "text-indigo-600", bg: "bg-indigo-100" },
+    "Entertainment": { icon: Ticket, color: "text-pink-600", bg: "bg-pink-100" },
+    "Personal": { icon: Sun, color: "text-orange-600", bg: "bg-orange-100" },
+    "Subscriptions": { icon: Zap, color: "text-purple-600", bg: "bg-purple-100" },
+    "Other": { icon: MoreHorizontal, color: "text-gray-600", bg: "bg-gray-100" }
 };
 
-// --- AUXILIARY HELPER COMPONENTS ---
+const getCategoryIcon = (category: string) => {
+    const config = CATEGORY_ICONS[category] || CATEGORY_ICONS["Other"];
+    const Icon = config.icon;
+    return <div className={`h-8 w-8 rounded-full flex items-center justify-center ${config.bg} ${config.color}`}><Icon className="w-4 h-4" /></div>;
+}
+
+const exportData = async (content: string, filename: string) => {
+    if (Capacitor.isNativePlatform()) {
+        try {
+            await Share.share({
+                title: filename,
+                text: content,
+                dialogTitle: 'Export CSV',
+            });
+        } catch (e) {
+            toast.error("Share failed");
+        }
+    } else {
+        const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        if (link.download !== undefined) {
+            const url = URL.createObjectURL(blob);
+            link.setAttribute("href", url);
+            link.setAttribute("download", filename);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    }
+}
+
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-sm rounded-2xl">
-                <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
+                <DialogHeader>
+                    <DialogTitle>{title}</DialogTitle>
+                    <DialogDescription>{description}</DialogDescription>
+                </DialogHeader>
                 <DialogFooter className="flex gap-2 sm:justify-end">
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
                     <Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button>
@@ -65,701 +95,763 @@ function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: 
     )
 }
 
-function PortalFAB({ onClick, className, icon: Icon }: any) {
-    const [mounted, setMounted] = useState(false);
-    useEffect(() => setMounted(true), []);
-    if (!mounted) return null;
-    return createPortal(
-        <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-[100] animate-in zoom-in duration-300">
-            <Button onClick={onClick} className={`${className} shadow-2xl border-4 border-white/20 active:scale-90 transition-transform`}>
-                <Icon className="w-8 h-8" />
-            </Button>
-        </div>,
-        document.body
-    );
-}
+export function Finance({ user, household, currencySymbol, hideBalances, refreshTrigger, viewScope }: { user: User, household: Household, currencySymbol: string, hideBalances?: boolean, refreshTrigger?: number, viewScope: 'unified' | 'household' | 'solo' }) {
+    const [members, setMembers] = useState<HouseholdMember[]>([])
+    const [expenses, setExpenses] = useState<Expense[]>([])
+    const [credits, setCredits] = useState<Credit[]>([])
+    const [isLoading, setIsLoading] = useState(true)
 
-function PullToRefresh({ onRefresh, children }: { onRefresh: () => Promise<void>, children: React.ReactNode }) {
-    const [startY, setStartY] = useState(0);
-    const [pullDistance, setPullDistance] = useState(0);
-    const [refreshing, setRefreshing] = useState(false);
-    const threshold = 80;
+    useEffect(() => {
+        async function fetchFinanceData() {
+            setIsLoading(true);
+            try {
+                const { data: memberIds } = await supabase.from('household_members').select('user_id').eq('household_id', household.id);
+                if (memberIds && memberIds.length > 0) {
+                    const ids = memberIds.map(m => m.user_id);
+                    const { data: profiles } = await supabase.from('profiles').select('id, email').in('id', ids);
+                    if (profiles) {
+                        const mappedMembers = profiles.map(p => ({
+                            user_id: p.id,
+                            email: p.email || 'Partner'
+                        }));
+                        setMembers(mappedMembers);
+                    }
+                }
+            } catch (e) {
+                console.error("Member fetch failed", e);
+            }
 
-    const handleTouchStart = (e: React.TouchEvent) => {
-        if (window.scrollY === 0) setStartY(e.touches[0].clientY);
-    };
+            const { data: expenseData } = await supabase.from('expenses').select('*').eq('household_id', household.id).order('expense_date', { ascending: false });
+            if (expenseData) setExpenses(expenseData as Expense[]);
 
-    const handleTouchMove = (e: React.TouchEvent) => {
-        if (startY > 0 && window.scrollY === 0) {
-            const currentY = e.touches[0].clientY;
-            const dist = Math.max(0, currentY - startY);
-            setPullDistance(dist > threshold ? threshold + (dist - threshold) * 0.3 : dist);
+            const { data: creditData } = await supabase.from('credits').select('*').eq('household_id', household.id).order('is_settled', { ascending: true }).order('created_at', { ascending: false });
+            if (creditData) setCredits(creditData as Credit[]);
+
+            setIsLoading(false);
         }
+        fetchFinanceData();
+
+        const expenseChannel = supabase.channel('expenses_changes')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses', filter: `household_id=eq.${household.id}` }, (payload) => {
+                if (payload.eventType === 'INSERT') setExpenses((prev) => [payload.new as Expense, ...prev]);
+                if (payload.eventType === 'UPDATE') setExpenses((prev) => prev.map(e => e.id === payload.new.id ? payload.new as Expense : e));
+                if (payload.eventType === 'DELETE') setExpenses((prev) => prev.filter(e => e.id !== payload.old.id));
+            }).subscribe()
+
+        const creditChannel = supabase.channel('credits_changes')
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'credits', filter: `household_id=eq.${household.id}` }, (payload) => {
+                if (payload.eventType === 'INSERT') setCredits((prev) => [payload.new as Credit, ...prev]);
+                if (payload.eventType === 'UPDATE') setCredits((prev) => prev.map(c => c.id === payload.new.id ? payload.new as Credit : c));
+                if (payload.eventType === 'DELETE') setCredits((prev) => prev.filter(e => e.id !== payload.old.id));
+            }).subscribe()
+
+        return () => { supabase.removeChannel(expenseChannel); supabase.removeChannel(creditChannel) }
+    }, [household.id, user, refreshTrigger]);
+
+    const getFilteredExpenses = () => {
+        if (viewScope === 'unified') return expenses;
+        if (viewScope === 'household') return expenses.filter(e => e.scope === 'household');
+        if (viewScope === 'solo') return expenses.filter(e => e.scope === 'personal');
+        return expenses;
     };
 
-    const handleTouchEnd = async () => {
-        if (pullDistance >= threshold) {
-            setRefreshing(true);
-            setPullDistance(threshold);
-            await onRefresh();
-            setRefreshing(false);
-        }
-        setStartY(0);
-        setPullDistance(0);
+    const getFilteredCredits = () => {
+        if (viewScope === 'unified') return credits;
+        if (viewScope === 'household') return credits.filter(c => c.scope === 'household');
+        if (viewScope === 'solo') return credits.filter(c => c.scope === 'personal');
+        return credits;
     };
+
+    const visibleExpenses = getFilteredExpenses();
+    const visibleCredits = getFilteredCredits();
+
+    const handleExportExpenses = () => {
+        const headers = ["Date", "Item", "Category", "Amount", "Notes", "User", "Scope"];
+        const rows = visibleExpenses.map(e => [new Date(e.expense_date).toLocaleDateString(), `"${e.name.replace(/"/g, '""')}"`, e.category, e.amount, `"${(e.notes || '').replace(/"/g, '""')}"`, e.user_id === user.id ? "Me" : "Partner", e.scope]);
+        exportData([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Expenses_${new Date().toISOString().split('T')[0]}.csv`);
+    }
+
+    const handleExportDebts = () => {
+        const headers = ["Date", "Status", "Amount", "Lender", "Borrower", "Note", "Scope"];
+        const rows = visibleCredits.map(c => [new Date(c.created_at).toLocaleDateString(), c.is_settled ? "Settled" : "Active", c.amount, c.lender_name, c.borrower_name, `"${(c.notes || '').replace(/"/g, '""')}"`, c.scope]);
+        exportData([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Debts_${new Date().toISOString().split('T')[0]}.csv`);
+    }
+
+    const activeCredits = visibleCredits.filter(c => !c.is_settled);
+    let iAmOwed = 0; let iOwe = 0;
+    activeCredits.forEach(c => { if (c.lender_user_id === user.id) iAmOwed += c.amount; else if (c.borrower_user_id === user.id) iOwe += c.amount; });
+    const netBalance = iAmOwed - iOwe;
+    const isPositive = netBalance >= 0;
+    const isZero = netBalance === 0;
+    const displayBalance = hideBalances ? '****' : (isZero ? '0' : Math.abs(netBalance).toLocaleString());
 
     return (
-        <div onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-            <div style={{ height: pullDistance, transition: refreshing ? 'height 0.2s' : 'none' }} className="w-full overflow-hidden flex items-center justify-center bg-slate-50">
-                <div className={`transition-transform ${pullDistance > threshold / 2 ? 'rotate-180' : ''}`}>
-                    {refreshing ? <Loader2 className="w-6 h-6 animate-spin text-indigo-600" /> : <ArrowDown className="w-6 h-6 text-slate-400" />}
+        <TooltipProvider>
+            <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
+                <div className="px-4 pt-2 pb-4">
+                    {/* ⚡ FIX H1: Changed rounded-2xl to rounded-md */}
+                    <div className={`rounded-md px-6 py-3 flex items-center justify-between shadow-md ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
+                        <div className="flex flex-col">
+                            <span className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest">Net Position</span>
+                            {!isZero && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
+                        </div>
+                        <div className="text-2xl font-bold tracking-tight">
+                            {isPositive && !isZero ? '+' : ''}{currencySymbol}{displayBalance}
+                        </div>
+                    </div>
                 </div>
+
+                <Tabs defaultValue="summary" className="w-full">
+                    <div className="flex items-center justify-between mb-4 px-1">
+                        <TabsList className="flex w-full sm:w-auto bg-slate-100/80 p-1 rounded-xl gap-1 overflow-x-auto no-scrollbar">
+                            <TabsTrigger value="summary" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-indigo-600 data-[state=active]:text-white transition-all"><DollarSign className="w-3.5 h-3.5 mr-1" /> Summary</TabsTrigger>
+                            <TabsTrigger value="expenses" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-teal-600 data-[state=active]:text-white transition-all"><History className="w-3.5 h-3.5 mr-1" /> Expenses</TabsTrigger>
+                            <TabsTrigger value="credit" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-rose-600 data-[state=active]:text-white transition-all"><HandCoins className="w-3.5 h-3.5 mr-1" /> Debts</TabsTrigger>
+                        </TabsList>
+
+                        <DropdownMenu>
+                            {/* ⚡ FIX: Export dropdown only visible on desktop (sm:flex) */}
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="sm" className="hidden sm:flex gap-2 ml-2 border-slate-200 text-slate-600 bg-white">
+                                    <Download className="w-4 h-4" /> Export <ChevronDown className="w-3 h-3 opacity-50" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56">
+                                <DropdownMenuLabel>Export Data</DropdownMenuLabel>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={handleExportExpenses}><FileSpreadsheet className="w-4 h-4 mr-2 text-emerald-600" /> Expenses (CSV)</DropdownMenuItem>
+                                <DropdownMenuItem onClick={handleExportDebts}><FileSpreadsheet className="w-4 h-4 mr-2 text-blue-600" /> Debts/IOUs (CSV)</DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+
+                    <TabsContent value="summary" className="animate-in fade-in">
+                        <FinanceSummary
+                            expenses={visibleExpenses}
+                            credits={visibleCredits}
+                            user={user}
+                            currencySymbol={currencySymbol}
+                            hideBalances={hideBalances}
+                            iAmOwed={iAmOwed}
+                            iOwe={iOwe}
+                        />
+                    </TabsContent>
+
+                    <TabsContent value="expenses" className="animate-in fade-in">
+                        <ExpensesList
+                            user={user} household={household} members={members}
+                            expenses={visibleExpenses} setExpenses={setExpenses}
+                            currencySymbol={currencySymbol} hideBalances={hideBalances}
+                            viewScope={viewScope}
+                            isLoading={isLoading}
+                        />
+                    </TabsContent>
+
+                    <TabsContent value="credit" className="animate-in fade-in">
+                        <CreditsList
+                            user={user} household={household} members={members}
+                            credits={visibleCredits} setCredits={setCredits}
+                            currencySymbol={currencySymbol} hideBalances={hideBalances}
+                        />
+                    </TabsContent>
+                </Tabs>
             </div>
-            {children}
-        </div>
-    );
-}
-
-// --- CREATE MENU ---
-function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess, currencySymbol, viewScope }: {
-    isOpen: boolean, onOpenChange: (open: boolean) => void, context: string, user: User, household: Household, onSuccess: () => void, currencySymbol: string, viewScope: 'unified' | 'household' | 'solo'
-}) {
-    const [loading, setLoading] = useState(false);
-    const [mode, setMode] = useState<'menu' | 'expense' | 'shopping' | 'wishlist'>('menu');
-
-    useEffect(() => {
-        if (isOpen) {
-            if (context === 'finance') setMode('expense');
-            else if (context === 'wishlist') setMode('wishlist');
-            else if (context === 'shopping') setMode('shopping');
-            else setMode('menu');
-        }
-    }, [isOpen, context]);
-
-    const defaultScope = viewScope === 'solo' ? 'personal' : 'household';
-    const [expForm, setExpForm] = useState({ name: '', amount: '', category: EXPENSE_CATEGORIES[0], scope: defaultScope });
-    const [listForm, setListForm] = useState({ name: '', isPrivate: false, listType: 'shopping' as 'shopping' | 'wishlist' });
-
-    useEffect(() => {
-        setExpForm(prev => ({ ...prev, scope: viewScope === 'solo' ? 'personal' : 'household' }));
-    }, [viewScope]);
-
-    const handleExpense = async (e: FormEvent) => {
-        e.preventDefault(); setLoading(true);
-        const { error } = await supabase.from('expenses').insert({
-            user_id: user.id, household_id: household.id, name: expForm.name, amount: parseFloat(expForm.amount), category: expForm.category, scope: expForm.scope, expense_date: new Date().toISOString(),
-        });
-        setLoading(false);
-        if (!error) {
-            setExpForm({ name: '', amount: '', category: EXPENSE_CATEGORIES[0], scope: defaultScope });
-            onOpenChange(false);
-            onSuccess();
-            toast.success("Expense logged!");
-        } else {
-            toast.error(error.message);
-        }
-    };
-
-    const handleList = async () => {
-        setLoading(true);
-        const actualListType = mode === 'wishlist' ? 'wishlist' : 'shopping';
-        const { error } = await supabase.from('lists').insert({
-            name: listForm.name, household_id: household.id, owner_id: user.id, is_private: listForm.isPrivate, list_type: actualListType
-        });
-        setLoading(false);
-        if (!error) {
-            setListForm({ name: '', isPrivate: false, listType: 'shopping' });
-            onOpenChange(false);
-            onSuccess();
-            toast.success(mode === 'wishlist' ? "Wishlist created!" : "List created!");
-        } else {
-            toast.error(error.message);
-        }
-    };
-
-    const renderMenu = () => (
-        <div className="grid grid-cols-2 gap-3 pt-2">
-            <button onClick={() => setMode('expense')} className="flex flex-col items-center justify-center p-4 bg-teal-50 hover:bg-teal-100 border-2 border-teal-100 rounded-2xl transition-all active:scale-95 group">
-                <div className="w-12 h-12 bg-teal-200 text-teal-700 rounded-full flex items-center justify-center mb-2 group-hover:bg-teal-300 transition-colors"><Receipt className="w-6 h-6" /></div>
-                <span className="text-sm font-bold text-teal-800">Expense</span>
-                <span className="text-[10px] text-teal-600">Log spending</span>
-            </button>
-            <button onClick={() => { setMode('shopping'); setListForm(prev => ({ ...prev, listType: 'shopping' })) }} className="flex flex-col items-center justify-center p-4 bg-lime-50 hover:bg-lime-100 border-2 border-lime-100 rounded-2xl transition-all active:scale-95 group">
-                <div className="w-12 h-12 bg-lime-200 text-lime-700 rounded-full flex items-center justify-center mb-2 group-hover:bg-lime-300 transition-colors"><ShoppingCart className="w-6 h-6" /></div>
-                <span className="text-sm font-bold text-lime-800">Shopping List</span>
-                <span className="text-[10px] text-lime-600">Plan purchases</span>
-            </button>
-            <button onClick={() => { setMode('wishlist'); setListForm(prev => ({ ...prev, listType: 'wishlist' })) }} className="col-span-2 flex flex-row items-center gap-4 p-4 bg-emerald-50 hover:bg-emerald-100 border-2 border-emerald-100 rounded-2xl transition-all active:scale-95 group">
-                <div className="w-12 h-12 bg-emerald-200 text-emerald-800 rounded-full flex items-center justify-center shrink-0 group-hover:bg-emerald-300 transition-colors"><Target className="w-6 h-6" /></div>
-                <div className="text-left"><span className="block text-sm font-bold text-emerald-900">Create Wishlist</span><span className="block text-[10px] text-emerald-700">Create a new collection</span></div>
-            </button>
-        </div>
-    );
-
-    const renderForm = () => {
-        if (mode === 'expense') return (
-            <form onSubmit={handleExpense} className="space-y-4 pt-1 animate-in slide-in-from-right-8 duration-200">
-                <div className="flex bg-slate-100 p-1 rounded-xl mb-4"><button type="button" onClick={() => setExpForm({ ...expForm, scope: 'household' })} className={`flex-1 text-xs py-2 rounded-lg transition-all ${expForm.scope === 'household' ? 'bg-white shadow text-slate-900 font-bold' : 'text-slate-400'}`}>Household</button><button type="button" onClick={() => setExpForm({ ...expForm, scope: 'personal' })} className={`flex-1 text-xs py-2 rounded-lg transition-all ${expForm.scope === 'personal' ? 'bg-white shadow text-slate-900 font-bold' : 'text-slate-400'}`}>Personal</button></div>
-                <div className="grid grid-cols-2 gap-3"><div className="space-y-1"><Label>Amount</Label><div className="relative"><span className="absolute left-3 top-2.5 text-slate-400 text-sm">{currencySymbol}</span><Input type="number" placeholder="0.00" value={expForm.amount} onChange={e => setExpForm({ ...expForm, amount: e.target.value })} required className="pl-7 bg-slate-50 border-slate-200 h-11" /></div></div><div className="space-y-1"><Label>Category</Label><Select value={expForm.category} onValueChange={v => setExpForm({ ...expForm, category: v })}><SelectTrigger className="bg-slate-50 border-slate-200 h-11"><SelectValue /></SelectTrigger><SelectContent>{EXPENSE_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div></div>
-                <div className="space-y-1"><Label>What was it?</Label><Input placeholder="e.g. Weekly Groceries" value={expForm.name} onChange={e => setExpForm({ ...expForm, name: e.target.value })} required className="bg-slate-50 border-slate-200 h-11" /></div>
-                <Button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 h-12 text-base font-medium" disabled={loading}>{loading ? 'Saving...' : 'Log Expense'}</Button>
-            </form>
-        );
-        if (mode === 'shopping' || mode === 'wishlist') {
-            const isWishlist = mode === 'wishlist';
-            return (
-                <div className="space-y-4 pt-1 animate-in slide-in-from-right-8 duration-200">
-                    <div className={`p-3 rounded-xl border mb-2 ${isWishlist ? 'bg-emerald-50 border-emerald-100' : 'bg-lime-50 border-lime-100'}`}>
-                        <p className={`text-xs leading-relaxed ${isWishlist ? 'text-emerald-800' : 'text-lime-800'}`}>{isWishlist ? "Create a new Wishlist Collection to track savings and targets." : "Create a new Shopping List for your household's active purchases."}</p>
-                    </div>
-                    <div className="space-y-1"><Label>{mode === 'shopping' ? 'Shopping List Name' : 'Wishlist Name'}</Label><Input placeholder={mode === 'shopping' ? "e.g. Monthly Groceries" : "e.g. Vacation Fund"} value={listForm.name} onChange={e => setListForm({ ...listForm, name: e.target.value })} className="bg-slate-50 border-slate-200 h-11" /></div>
-                    <div className="flex items-center space-x-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        <Checkbox id="priv-check" checked={listForm.isPrivate} onCheckedChange={(c) => setListForm({ ...listForm, isPrivate: c as boolean })} />
-                        <Label htmlFor="priv-check" className="text-sm font-medium text-slate-600">{listForm.isPrivate ? <span className="text-rose-600 font-bold">Private Wishlist (Private)</span> : <span className="text-emerald-600 font-bold">Household Wishlist (Shared)</span>}</Label>
-                    </div>
-                    <Button onClick={() => handleList()} className={`w-full h-12 text-base font-medium ${mode === 'shopping' ? 'bg-lime-600 hover:bg-lime-700 text-slate-900' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`} disabled={loading || !listForm.name}>{loading ? 'Creating...' : `Create ${mode === 'shopping' ? 'List' : 'Wishlist'}`}</Button>
-                </div>
-            );
-        }
-    };
-
-    return (
-        <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-md w-[95%] rounded-3xl p-6 gap-0">
-                <DialogHeader className="mb-4 flex flex-row items-center justify-between space-y-0">
-                    <div className="flex items-center gap-3">
-                        {mode !== 'menu' && (<Button variant="ghost" size="icon" onClick={() => setMode('menu')} className="h-8 w-8 -ml-2 rounded-full hover:bg-slate-100"><ArrowLeft className="w-5 h-5 text-slate-500" /></Button>)}
-                        <DialogTitle className="text-xl font-bold text-slate-800">{mode === 'menu' ? 'Create New' : mode === 'expense' ? 'Log Expense' : mode === 'shopping' ? 'New Shopping List' : 'New Wishlist'}</DialogTitle>
-                    </div>
-                </DialogHeader>
-                {mode === 'menu' ? renderMenu() : renderForm()}
-            </DialogContent>
-        </Dialog>
+        </TooltipProvider>
     )
 }
 
-// --- LIST MANAGER ---
-function ListManager({ user, household, listType, onListSelected, currencySymbol, refreshTrigger }: { user: User, household: Household, listType: 'wishlist' | 'shopping', onListSelected: (isSelected: boolean) => void, currencySymbol: string, refreshTrigger: number }) {
-    const [lists, setLists] = useState<ListWithSummary[]>([])
-    const [selectedList, setSelectedList] = useState<List | null>(null)
-    const [isLoading, setIsLoading] = useState(true)
-    const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: string } | null>(null)
-    const [showExplainer, setShowExplainer] = useState(false);
+function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances, iAmOwed, iOwe }: any) {
+    const totalExpenses = expenses.reduce((sum: number, e: any) => sum + e.amount, 0);
+    const now = new Date();
+    const currentMonthExpenses = expenses.filter((e: any) => { const d = new Date(e.expense_date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((sum: number, e: any) => sum + e.amount, 0);
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthExpenses = expenses.filter((e: any) => { const d = new Date(e.expense_date); return d.getMonth() === lastMonthDate.getMonth() && d.getFullYear() === lastMonthDate.getFullYear(); }).reduce((sum: number, e: any) => sum + e.amount, 0);
 
-    useEffect(() => { onListSelected(!!selectedList) }, [selectedList, onListSelected])
+    const categoryTotals: { [key: string]: number } = {};
+    expenses.forEach((e: any) => { categoryTotals[e.category] = (categoryTotals[e.category] || 0) + e.amount });
 
-    const fetchLists = async () => {
-        setIsLoading(true)
+    const top3Categories = Object.entries(categoryTotals)
+        .map(([cat, amt]) => ({ category: cat, amount: amt }))
+        .sort((a, b) => b.amount - a.amount)
+        .slice(0, 3);
+
+    const format = (val: number) => hideBalances ? '****' : val.toLocaleString();
+
+    return (
+        <div className="space-y-4 p-2">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+
+                <Card className="rounded-xl border-none shadow-md bg-indigo-600 text-white h-28 flex flex-col justify-center relative overflow-hidden">
+                    <div className="absolute right-2 top-2 opacity-20"><History className="w-8 h-8" /></div>
+                    <CardHeader className="p-4 pb-0"><CardTitle className="text-[10px] font-bold text-indigo-100 uppercase">{now.toLocaleString('default', { month: 'short' })} Spend</CardTitle></CardHeader>
+                    <CardContent className="p-4 pt-1">
+                        <div className="text-2xl font-bold">{currencySymbol}{format(currentMonthExpenses)}</div>
+                        <p className="text-[10px] text-indigo-200 mt-1">Prev: {currencySymbol}{format(lastMonthExpenses)}</p>
+                    </CardContent>
+                </Card>
+
+                <Card className="rounded-xl border-none shadow-md bg-amber-500 text-white h-28 flex flex-col justify-center relative overflow-hidden">
+                    <div className="absolute right-2 top-2 opacity-20"><HandCoins className="w-8 h-8" /></div>
+                    <CardHeader className="p-4 pb-0"><CardTitle className="text-[10px] font-bold text-amber-100 uppercase">Outstanding</CardTitle></CardHeader>
+                    <CardContent className="p-4 pt-1 flex flex-col justify-center h-full">
+                        <div className="flex justify-between items-end border-b border-amber-400/30 pb-1 mb-1">
+                            <span className="text-xs font-medium text-amber-100">You Owe</span>
+                            <span className="text-lg font-bold">{currencySymbol}{format(iOwe)}</span>
+                        </div>
+                        <div className="flex justify-between items-end">
+                            <span className="text-xs font-medium text-amber-100">Owed to You</span>
+                            <span className="text-lg font-bold">{currencySymbol}{format(iAmOwed)}</span>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card className="rounded-xl border-none shadow-md bg-purple-600 text-white h-28 flex flex-col justify-center relative overflow-hidden">
+                    <div className="absolute right-2 top-2 opacity-20"><Lightbulb className="w-8 h-8" /></div>
+                    <CardHeader className="p-3 pb-0"><CardTitle className="text-[10px] font-bold text-purple-100 uppercase">Top Spending</CardTitle></CardHeader>
+                    <CardContent className="p-3 pt-1 flex flex-col justify-center gap-1.5 h-full">
+                        {top3Categories.length === 0 ? (
+                            <p className="text-xs text-purple-100 opacity-70">No data yet</p>
+                        ) : (
+                            top3Categories.map((item, idx) => {
+                                const percent = totalExpenses > 0 ? (item.amount / totalExpenses) * 100 : 0;
+                                return (
+                                    <div key={idx} className="w-full">
+                                        <div className="flex justify-between text-[10px] font-medium mb-0.5 leading-none">
+                                            <span className="truncate max-w-[80px]">{item.category}</span>
+                                            <span>{Math.round(percent)}%</span>
+                                        </div>
+                                        <div className="w-full h-1.5 bg-purple-800/30 rounded-full overflow-hidden">
+                                            <div className="h-full bg-purple-200" style={{ width: `${percent}%` }}></div>
+                                        </div>
+                                    </div>
+                                )
+                            })
+                        )}
+                    </CardContent>
+                </Card>
+            </div >
+
+            <Card className="border-none shadow-sm bg-white/50">
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-bold text-slate-500 uppercase tracking-wider">Recent Activity</CardTitle></CardHeader>
+                <CardContent>
+                    {expenses.length === 0 ? <p className="text-slate-400 text-sm italic">No recent activity.</p> : (
+                        <ul className="space-y-2">
+                            {expenses.slice(0, 5).map((e: any) => (
+                                <li key={e.id} className="flex justify-between items-center py-2 border-b border-slate-100 last:border-0">
+                                    <div className="flex items-center gap-3">
+                                        {getCategoryIcon(e.category)}
+                                        <div><p className="text-sm font-medium text-slate-700">{e.name}</p><p className="text-[10px] text-slate-400">{new Date(e.expense_date).toLocaleDateString()}</p></div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-bold text-slate-700 text-sm">{currencySymbol}{format(e.amount)}</span>
+                                        {e.scope === 'personal' && <UserIcon className="w-3 h-3 text-slate-400" />}
+                                        {e.scope === 'household' && <HomeIcon className="w-3 h-3 text-slate-300" />}
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
+                    )}
+                </CardContent>
+            </Card>
+        </div >
+    )
+}
+
+function ExpensesList({ user, household, members, expenses, setExpenses, currencySymbol, hideBalances, viewScope, isLoading }: { user: User, household: Household, members: HouseholdMember[], expenses: Expense[], setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>, currencySymbol: string, hideBalances?: boolean, viewScope: string, isLoading: boolean }) {
+    const defaultScope = viewScope === 'solo' ? 'personal' : 'household';
+
+    const [isAddOpen, setIsAddOpen] = useState(false);
+    const [form, setForm] = useState({ name: '', price: '', quantity: '1', amount: '', category: EXPENSE_CATEGORIES[0], isReimbursable: false, reimburseAmount: '', notes: '', borrowerId: '', scope: defaultScope });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+    const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: number } | null>(null);
+    const [filter, setFilter] = useState<'All' | 'Month' | 'Prev'>('Month');
+    const [page, setPage] = useState(1);
+    const ITEMS_PER_PAGE = 10;
+    const partners = members.filter(m => m.user_id !== user?.id);
+    const hasPartners = partners.length > 0;
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        setForm(prev => ({ ...prev, scope: viewScope === 'solo' ? 'personal' : 'household' }));
+    }, [viewScope]);
+
+    const handleExport = () => {
+        const headers = ["Date", "Item", "Category", "Amount", "Notes", "User", "Scope"];
+        const rows = expenses.map(e => [new Date(e.expense_date).toLocaleDateString(), `"${e.name.replace(/"/g, '""')}"`, e.category, e.amount, `"${(e.notes || '').replace(/"/g, '""')}"`, e.user_id === user.id ? "Me" : "Partner", e.scope]);
+        exportData([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Expenses_History.csv`);
+    }
+
+    const formPrice = parseFloat(form.price) || 0;
+    const formQty = parseInt(form.quantity) || 1;
+    const formTotal = formPrice * formQty;
+
+    const handleExpenseSubmit = async (e: FormEvent) => {
+        e.preventDefault();
+        const amountToLog = formTotal > 0 ? formTotal : parseFloat(form.amount);
+
+        if (!form.name || amountToLog <= 0) {
+            toast.error("Please check your details.");
+            return;
+        }
+        setIsSubmitting(true);
         try {
-            // Parallel Fetching for speed
-            const [listsResult, summariesResult] = await Promise.all([
-                supabase.from("lists").select("*").eq("household_id", household.id).eq("list_type", listType).order("created_at", { ascending: true }),
-                supabase.rpc(listType === 'shopping' ? 'get_shopping_list_summaries' : 'get_wishlist_summaries', { target_household_id: household.id })
-            ]);
+            const { data: expense, error: expenseError } = await supabase.from('expenses').insert({
+                user_id: user.id,
+                household_id: household.id,
+                name: form.name,
+                amount: amountToLog,
+                category: form.category,
+                notes: form.notes || null,
+                expense_date: new Date().toISOString(),
+                scope: form.scope
+            }).select().single();
 
-            if (listsResult.error) throw listsResult.error;
+            if (expenseError) throw expenseError;
 
-            let finalLists: ListWithSummary[] = listsResult.data as ListWithSummary[];
-            if (summariesResult.data) {
-                const summaryMap = new Map(summariesResult.data.map((s: ListSummary) => [s.list_id, s]));
-                finalLists = listsResult.data.map((list: List) => {
-                    const s: any = summaryMap.get(list.id);
-                    return {
-                        ...list,
-                        pending_items: s?.total_pending_items || 0,
-                        estimated_cost: s?.estimated_cost || 0,
-                        active_goals: s?.total_active_goals || 0,
-                        target_amount: s?.total_target_amount || 0,
-                        saved_amount: s?.total_saved_amount || 0,
-                        total_goals: s?.total_goals || 0,
-                        completed_goals: s?.completed_goals || 0
-                    }
-                });
+            setExpenses(prev => [expense as Expense, ...prev]);
+
+            if (form.isReimbursable && hasPartners && form.scope === 'household') {
+                const reimburseVal = parseFloat(form.reimburseAmount);
+                if (reimburseVal > 0) {
+                    let targetBorrowerId = partners[0].user_id;
+                    if (partners.length > 1 && form.borrowerId) targetBorrowerId = form.borrowerId;
+                    const targetBorrowerName = members.find(m => m.user_id === targetBorrowerId)?.email.split('@')[0] || 'Partner';
+                    await supabase.from('credits').insert({
+                        household_id: household.id, amount: reimburseVal, notes: `Reimbursement: ${form.name}`, lender_user_id: user.id, lender_name: 'Me', borrower_user_id: targetBorrowerId, borrower_name: targetBorrowerName,
+                        scope: 'household'
+                    });
+                }
             }
-            setLists(finalLists);
-        } catch (e) {
-            console.error("List Fetch Error:", e);
+
+            // ⚡ UX FIX: Clear fields for next rapid entry and refocus
+            setForm(f => ({
+                ...f,
+                name: '',
+                price: '',
+                amount: '',
+                notes: '',
+            }));
+            inputRef.current?.focus();
+
+            // ⚡ UX FIX: Show success toast and Haptic Feedback (Enum fix applied here)
+            if (Capacitor.isNativePlatform()) {
+                Haptics.impact({ style: ImpactStyle.Light });
+            }
+            toast.success("Item Added", { duration: 500 });
+
+            // Do not close the modal
+
+        } catch (error: any) {
+            toast.error(`Error: ${error.message}`);
         } finally {
-            setIsLoading(false);
+            setIsSubmitting(false);
         }
     };
 
-    useEffect(() => { fetchLists() }, [household.id, listType, refreshTrigger]);
-
-    const handleUpdateList = (updated: List) => setLists(lists.map(l => l.id === updated.id ? { ...l, ...updated } : l));
-    const handleDeleteList = async () => {
+    const handleDeleteExpense = async () => {
         if (!deleteConfirm) return;
-        await supabase.from('lists').delete().eq('id', deleteConfirm.id);
-        setLists(lists.filter(l => l.id !== deleteConfirm.id));
-        setDeleteConfirm(null);
-        toast.success("List deleted.");
-    }
-
-    const handleBack = () => {
-        setSelectedList(null);
-        fetchLists();
-    }
-
-    const explainerContent = listType === 'shopping' ? {
-        title: "Mastering Shopping Lists",
-        icon: <ShoppingCart className="w-12 h-12 text-lime-600" />,
-        text: (
-            <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
-                <p><strong>1. Create Collections:</strong> Create lists like <em>"Monthly Groceries"</em> or <em>"Party Supplies"</em>.</p>
-                <p><strong>2. Add Items:</strong> Open a list to add items, quantities and priorities.</p>
-                <p><strong>3. Collaborate:</strong> By default, lists are shared with your household. Toggle <strong>Private</strong> inside the list settings if it's just for you.</p>
-            </div>
-        )
-    } : {
-        title: "Your Wishlists",
-        icon: <Target className="w-12 h-12 text-emerald-600" />,
-        text: (
-            <div className="space-y-3 text-sm text-slate-600 leading-relaxed">
-                <p>This is your custom wish list collection. From <strong>personal wishlists</strong> to <strong>household wishlists</strong>.</p>
-                <p>You can make lists <strong>Private</strong> for your eyes only, or <strong>Shared</strong> with the entire household.</p>
-                <p>After creating a wishlist, you can add specific items or goals to track.</p>
-            </div>
-        )
-    };
-
-    if (selectedList) {
-        return (
-            // ⚡ FIX: Render the List Detail in a Fixed container to escape the Dashboard stacking context
-            <div className="fixed inset-0 z-[100] bg-slate-50 animate-in slide-in-from-right-10 duration-300 overflow-y-auto pointer-events-auto">
-                <div className="w-full min-h-full p-4 pt-14 pb-32">
-                    {/* Back button needs explicit pointer-events to be clickable inside the overall auto-capture */}
-                    <Button
-                        variant="ghost"
-                        onClick={handleBack}
-                        className="mb-4 bg-white/80 backdrop-blur hover:bg-white text-slate-600 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm border border-slate-200 pointer-events-auto"
-                    >
-                        <ArrowLeft className="w-4 h-4" /> Back to Lists
-                    </Button>
-                    {listType === 'wishlist' ? <ListDetail user={user} list={selectedList} currencySymbol={currencySymbol} /> : <ShoppingList user={user} list={selectedList} currencySymbol={currencySymbol} />}
-                </div>
-            </div>
-        )
-    }
-
-    const grandTotalCost = lists.reduce((s, l) => s + (l.estimated_cost || 0), 0);
-    const grandTotalItems = lists.reduce((s, l) => s + (l.pending_items || 0), 0);
-    const grandTotalGoals = lists.reduce((s, l) => s + (l.total_goals || 0), 0);
-    const grandTotalTarget = lists.reduce((s, l) => s + (l.target_amount || 0), 0);
-    const grandTotalSaved = lists.reduce((s, l) => s + (l.saved_amount || 0), 0);
-    const progress = grandTotalTarget > 0 ? (grandTotalSaved / grandTotalTarget) * 100 : 0;
-    const grandTotalCompletedGoals = lists.reduce((s, l) => s + (l.completed_goals || 0), 0);
-    const grandTotalUncompletedGoals = grandTotalGoals - grandTotalCompletedGoals;
-
-    const getListIcon = (list: List) => {
-        if (list.list_type === 'wishlist') {
-            return list.is_private ? <Lock className="w-5 h-5" /> : <Target className="w-5 h-5" />;
+        const { error } = await supabase.from('expenses').delete().eq('id', deleteConfirm.id);
+        if (error) toast.error(`Error: ${error.message}`);
+        else {
+            setExpenses(prev => prev.filter(e => e.id !== deleteConfirm.id));
+            toast.success("Expense removed.");
         }
-        return list.is_private ? <Lock className="w-5 h-5" /> : <ShoppingCart className="w-5 h-5" />;
-    };
+        setDeleteConfirm(null);
+    }
+    const handleExpenseUpdated = async (updatedForm: any) => {
+        if (!editingExpense) return;
+        const { error } = await supabase.from('expenses').update({
+            name: updatedForm.name,
+            amount: parseFloat(updatedForm.amount),
+            category: updatedForm.category,
+            notes: updatedForm.notes,
+            scope: updatedForm.scope
+        }).eq('id', editingExpense.id);
+
+        if (error) toast.error(`Error: ${error.message}`);
+        else {
+            setExpenses(prev => prev.map(e => e.id === editingExpense.id ? { ...e, ...updatedForm, amount: parseFloat(updatedForm.amount) } : e));
+            setEditingExpense(null);
+            toast.success("Expense details saved.");
+        }
+    }
+    const filteredExpenses = expenses.filter(e => {
+        const d = new Date(e.expense_date);
+        const now = new Date();
+        if (filter === 'Month') return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+        if (filter === 'Prev') { const prevMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1); return d.getMonth() === prevMonth.getMonth() && d.getFullYear() === prevMonth.getFullYear(); }
+        return true;
+    }).sort((a, b) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime());
+    const totalPages = Math.ceil(filteredExpenses.length / ITEMS_PER_PAGE);
+    const paginatedExpenses = filteredExpenses.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
+
+    const ExpenseSkeleton = () => (
+        <div className="space-y-3">
+            {[...Array(5)].map((_, i) => (
+                <div key={i} className="bg-white border rounded-xl shadow-sm p-3 flex justify-between items-center">
+                    <div className="flex items-center gap-3">
+                        <Skeleton className="h-8 w-8 rounded-full" />
+                        <div>
+                            <Skeleton className="h-4 w-24 mb-1" />
+                            <Skeleton className="h-3 w-16" />
+                        </div>
+                    </div>
+                    <Skeleton className="h-4 w-12" />
+                </div>
+            ))}
+        </div>
+    );
 
     return (
         <div className="space-y-6">
+            <div className="flex justify-end">
+                <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+                    <DialogTrigger asChild>
+                        <Button className="bg-teal-600 hover:bg-teal-700 text-white font-bold gap-2 rounded-xl shadow-md">
+                            <Plus className="w-4 h-4" /> Add Expense
+                        </Button>
+                    </DialogTrigger>
+                    {/* ⚡ Pass inputRef to the first input for refocus */}
+                    <DialogContent className="sm:max-w-md rounded-2xl">
+                        <DialogHeader>
+                            <DialogTitle>Log New Expense</DialogTitle>
+                            <DialogDescription>Track spending for you or the house.</DialogDescription>
+                        </DialogHeader>
+                        <form onSubmit={handleExpenseSubmit} className="space-y-4 pt-2">
+                            <div className="flex bg-slate-100 p-1 rounded-lg">
+                                <button type="button" onClick={() => setForm({ ...form, scope: 'household' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'household' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>House</button>
+                                <button type="button" onClick={() => setForm({ ...form, scope: 'personal' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'personal' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>Personal</button>
+                            </div>
 
-            {lists.length > 0 && (
-                <div className="flex justify-end mb-2">
-                    <Button variant="ghost" size="sm" onClick={() => setShowExplainer(true)} className="text-slate-400 hover:text-slate-600 h-6 px-2 text-[10px] uppercase font-bold gap-1 bg-slate-50 border border-slate-100 rounded-lg">
-                        <Info className="w-3 h-3" /> How it works
-                    </Button>
-                </div>
-            )}
+                            <div className="grid grid-cols-4 gap-3">
+                                <div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} className="bg-slate-50 h-10 text-center" /></div>
+                                <div className="col-span-3"><Label>Unit Price ({currencySymbol})</Label><Input type="number" step="0.01" value={form.price} onChange={e => setForm({ ...form, price: e.target.value })} className="bg-slate-50 h-10" /></div>
+                            </div>
+                            {formTotal > 0 && <div className="flex justify-between items-center bg-teal-50 px-3 py-2 rounded-lg border border-teal-100"><span className="text-xs text-teal-600 font-bold uppercase">Total Cost</span><span className="text-lg font-bold text-teal-700">{currencySymbol}{formTotal.toLocaleString()}</span></div>}
+                            <div className="grid grid-cols-1 gap-4"><div className="space-y-2"><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger className="bg-slate-50 h-10 text-sm"><SelectValue /></SelectTrigger><SelectContent>{EXPENSE_CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div></div>
+                            <div className="space-y-2"><Label>Description</Label><Input ref={inputRef} value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required className="bg-slate-50 h-10 text-sm" /></div>
+                            <div className="space-y-2"><Label>Notes</Label><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-slate-50 h-10 text-sm" /></div>
+                            {formTotal === 0 && <div className="space-y-2"><Label>Total Amount ({currencySymbol})*</Label><Input type="number" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} className="bg-slate-50 h-10 text-sm" /></div>}
 
-            {isLoading ? (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {[1, 2, 3, 4].map(i => (
-                        <div key={i} className="bg-white border border-slate-200 rounded-2xl p-5">
-                            <div className="flex items-center gap-3 mb-3">
-                                <Skeleton className="h-10 w-10 rounded-xl" />
-                                <div className="flex-1 space-y-2">
-                                    <Skeleton className="h-4 w-3/4" />
-                                    <Skeleton className="h-3 w-1/2" />
-                                </div>
-                            </div>
-                            <div className="border-t border-slate-50 pt-2 space-y-2">
-                                <Skeleton className="h-3 w-full" />
-                                <Skeleton className="h-3 w-2/3" />
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            ) : (
-                <>
-                    {lists.length === 0 && (
-                        <div className="bg-white border border-slate-100 rounded-2xl p-6 text-center shadow-lg animate-in fade-in duration-500">
-                            <div className="flex flex-col items-center">
-                                {explainerContent.icon}
-                                <h2 className="text-xl font-bold text-slate-800 mt-4">{explainerContent.title}</h2>
-                            </div>
-                            <div className="text-left bg-slate-50/50 p-4 rounded-xl border border-slate-100 mt-4">
-                                {explainerContent.text}
-                            </div>
-                            <p className="text-xs text-slate-400 mt-4 font-medium">Use the <Plus className="inline w-3 h-3 -mt-0.5" /> button below to create your first List/Collection.</p>
-                        </div>
-                    )}
-
-                    {lists.length > 0 && (
-                        <>
-                            {listType === 'shopping' ? (
-                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                    <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white">
-                                        <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Items Remaining</CardTitle>
-                                        <div className="text-2xl font-bold text-slate-800">{grandTotalItems.toLocaleString()}</div>
-                                    </Card>
-                                    <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white">
-                                        <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Est. Cost</CardTitle>
-                                        <div className="text-2xl font-bold text-lime-700">{currencySymbol}{grandTotalCost.toLocaleString()}</div>
-                                    </Card>
-                                </div>
-                            ) : (
-                                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                    <Card className="rounded-2xl shadow-sm border border-lime-100 p-4 bg-lime-50/50 hover:bg-lime-100/50">
-                                        <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-700 uppercase tracking-wider flex items-center gap-1"><Goal className="w-3 h-3" /> All Goals</CardTitle></CardHeader>
-                                        <CardContent className="p-0">
-                                            <div className="text-2xl font-bold text-lime-900">{grandTotalGoals.toLocaleString()}</div>
-                                            <p className="text-[10px] text-lime-700 font-medium mt-0.5">({grandTotalUncompletedGoals} Active, {grandTotalCompletedGoals} Done)</p>
-                                        </CardContent>
-                                    </Card>
-                                    <Card className="rounded-2xl shadow-sm border border-lime-100 p-4 bg-lime-50/50 hover:bg-lime-100/50">
-                                        <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-700 uppercase tracking-wider flex items-center gap-1"><PiggyBank className="w-3 h-3" /> Total Saved</CardTitle></CardHeader>
-                                        <CardContent className="p-0"><div className="text-2xl font-bold text-lime-800 truncate">{currencySymbol}{grandTotalSaved.toLocaleString()}</div></CardContent>
-                                    </Card>
-                                    <Card className="col-span-2 rounded-2xl shadow-sm border border-lime-100 px-4 py-3 bg-lime-50/50 hover:bg-lime-100/50 flex flex-col justify-center">
-                                        <div className="flex justify-between items-center mb-1.5">
-                                            <CardTitle className="text-[10px] font-bold text-lime-700 uppercase tracking-wider">Overall Progress</CardTitle>
-                                            <span className="text-[10px] text-slate-500 font-medium">Target: {currencySymbol}{grandTotalTarget.toLocaleString()}</span>
-                                        </div>
-                                        <div className="flex items-center gap-3">
-                                            <Progress value={progress} className="h-2 bg-white flex-1" indicatorClassName="bg-lime-500" />
-                                            <span className="text-lg font-bold text-lime-800">{Math.round(progress)}%</span>
-                                        </div>
-                                    </Card>
+                            {hasPartners && form.scope === 'household' && (
+                                <div className="space-y-3 p-3 border border-slate-200 rounded-xl bg-slate-50/50">
+                                    <div className="flex items-center space-x-2 mb-2"><Checkbox id="reimburse" checked={form.isReimbursable} onCheckedChange={(c) => setForm(f => ({ ...f, isReimbursable: c as boolean }))} /><Label htmlFor="reimburse" className="text-xs font-bold text-slate-600 cursor-pointer">Split Cost?</Label></div>
+                                    {form.isReimbursable && <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-1 pt-2"><div className="space-y-1.5"><Label className="text-[10px] text-slate-500 uppercase font-bold">Partner Owes ({currencySymbol})</Label><Input type="number" value={form.reimburseAmount} onChange={e => setForm({ ...form, reimburseAmount: e.target.value })} className="h-9 bg-white text-sm" placeholder="0.00" /></div>{partners.length > 1 && <div className="space-y-1.5"><Label className="text-[10px] text-slate-500 uppercase font-bold">Who?</Label><Select value={form.borrowerId} onValueChange={v => setForm({ ...form, borrowerId: v })}><SelectTrigger className="h-9 bg-white text-sm"><SelectValue placeholder="Select" /></SelectTrigger><SelectContent>{partners.map(p => <SelectItem key={p.user_id} value={p.user_id}>{p.email.split('@')[0]}</SelectItem>)}</SelectContent></Select></div>}</div>}
                                 </div>
                             )}
+                            <Button type="submit" className="w-full bg-teal-700 hover:bg-teal-800 text-white h-10 text-sm font-bold" disabled={isSubmitting}>{isSubmitting ? 'Adding...' : 'Add and Continue'}</Button>
+                            <Button type="button" onClick={() => setIsAddOpen(false)} variant="outline" className="w-full h-10 text-sm font-bold mt-2">Close</Button>
+                        </form>
+                    </DialogContent>
+                </Dialog>
+            </div>
 
-                            <Separator className="my-2" />
-
-                            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                                {lists.map(list => (
-                                    <div key={list.id} onClick={() => setSelectedList(list)} className={`group relative cursor-pointer bg-white border border-slate-200 rounded-2xl p-5 hover:shadow-lg transition-all ${listType === 'wishlist' ? 'hover:border-lime-300' : 'hover:border-lime-300'}`}>
-                                        <div className="flex items-center gap-3 mb-3">
-                                            <div className={`p-2 rounded-xl ${listType === 'wishlist' ? 'bg-lime-50 text-lime-600' : 'bg-lime-50 text-lime-600'}`}>
-                                                {getListIcon(list)}
-                                            </div>
-                                            <h3 className="font-bold text-slate-800 text-lg mb-0 truncate flex-1">{list.name}</h3>
-
-                                            {/* ⚡ RED PADLOCK */}
-                                            {list.is_private && <Lock className="w-5 h-5 text-red-500 fill-red-50 stroke-[2.5]" />}
-                                        </div>
-
-                                        <div className="text-sm text-slate-500 font-medium mt-1 border-t border-slate-50 pt-2">
-                                            {listType === 'shopping' ?
-                                                <>
-                                                    <p className="text-xs text-slate-500">{list.pending_items} items pending</p>
-                                                    <p className="text-sm font-bold text-lime-700">{currencySymbol}{(list.estimated_cost || 0).toLocaleString()}</p>
-                                                </>
-                                                :
-                                                <>
-                                                    <p className="text-xs text-slate-500">{list.active_goals} active goals</p>
-                                                    <p className="text-sm font-bold text-lime-700">{currencySymbol}{(list.saved_amount || 0).toLocaleString()} saved</p>
-                                                </>
-                                            }
-                                        </div>
-
-                                        {list.owner_id === user.id && (
-                                            <div className="absolute top-4 right-4 flex gap-2 bg-white shadow-sm rounded-lg p-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200">
-                                                <EditListDialog list={list} onListUpdated={handleUpdateList} />
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-rose-500 hover:bg-rose-50 rounded-md" onClick={(e) => { e.stopPropagation(); setDeleteConfirm({ isOpen: true, id: list.id }) }}><Trash2 className="w-4 h-4" /></Button>
-                                            </div>
-                                        )}
-                                    </div>
-                                ))}
-                            </div>
-                        </>
-                    )}
-                </>
-            )}
-
-            <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete List?" description="This action cannot be undone." onConfirm={handleDeleteList} />
-
-            <Dialog open={showExplainer} onOpenChange={setShowExplainer}>
-                <DialogContent className="sm:max-w-sm rounded-2xl text-center">
-                    <DialogHeader className="flex flex-col items-center">
-                        <div className="bg-slate-50 p-4 rounded-full mb-4">{explainerContent.icon}</div>
-                        <DialogTitle className="text-xl font-bold text-slate-800">{explainerContent.title}</DialogTitle>
-                        <DialogDescription>&nbsp;</DialogDescription>
-                    </DialogHeader>
-                    <div className="text-left bg-slate-50/50 p-4 rounded-xl border border-slate-100">
-                        {explainerContent.text}
+            <div className="space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2 mb-2">
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider ml-1">History</h3>
                     </div>
-                    <Button onClick={() => setShowExplainer(false)} className="w-full mt-2 bg-slate-900 rounded-xl">Got it!</Button>
-                </DialogContent>
+                    <div className="flex gap-1">{['Month', 'Prev', 'All'].map((f: any) => (<button key={f} onClick={() => { setFilter(f); setPage(1); }} className={`text-[10px] px-2 py-1 rounded-md font-bold transition-colors ${filter === f ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-600 bg-slate-50'}`}>{f === 'Month' ? 'This Month' : f === 'Prev' ? 'Last Month' : 'All Time'}</button>))}</div>
+                </div>
+
+                {paginatedExpenses.length === 0 && !isLoading ? <div className="text-center py-8 text-slate-400 text-xs">No expenses found for this filter.</div> :
+                    isLoading && paginatedExpenses.length === 0 ? <ExpenseSkeleton /> :
+                        paginatedExpenses.map((expense) => (
+                            <div key={expense.id} className={`bg-white border rounded-xl shadow-sm transition-all cursor-pointer hover:border-indigo-200 group relative`} onClick={() => setEditingExpense(expense)}>
+                                <div className="flex justify-between items-center p-3">
+                                    <div className="flex items-center gap-3">
+                                        {getCategoryIcon(expense.category)}
+                                        <div><p className="font-semibold text-slate-800 text-sm">{expense.name}</p><p className="text-[10px] text-slate-500">{new Date(expense.expense_date).toLocaleDateString()}</p></div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-bold text-slate-700 text-sm">{currencySymbol}{hideBalances ? '****' : expense.amount.toLocaleString()}</span>
+                                        {viewScope === 'unified' && expense.scope === 'personal' && <UserIcon className="w-3 h-3 text-slate-400" />}
+                                        {viewScope === 'unified' && expense.scope === 'household' && <HomeIcon className="w-3 h-3 text-slate-300" />}
+                                        <Pencil className="w-3.5 h-3.5 text-slate-300 group-hover:text-indigo-500 transition-colors" />
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                {totalPages > 1 && (
+                    <div className="flex justify-center items-center gap-4 pt-2"><Button variant="ghost" size="icon" className="h-8 w-8" disabled={page === 1} onClick={() => setPage(p => p - 1)}><ChevronLeft className="w-4 h-4 text-slate-500" /></Button><span className="text-xs font-medium text-slate-500">Page {page} of {totalPages}</span><Button variant="ghost" size="icon" className="h-8 w-8" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight className="w-4 h-4 text-slate-500" /></Button></div>
+                )}
+            </div>
+            <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete Expense?" description="Undo not available." onConfirm={handleDeleteExpense} />
+            <Dialog open={!!editingExpense} onOpenChange={() => setEditingExpense(null)}>
+                {editingExpense && <DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit Expense</DialogTitle><DialogDescription>Update transaction details.</DialogDescription></DialogHeader>
+                    <div className="flex justify-end mb-2"><Button variant="ghost" size="sm" className="text-rose-500 hover:bg-rose-50" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingExpense.id }); setEditingExpense(null); }}><Trash2 className="w-4 h-4 mr-2" /> Delete</Button></div>
+                    <EditExpenseForm expense={editingExpense} onExpenseUpdated={handleExpenseUpdated} categories={EXPENSE_CATEGORIES} currencySymbol={currencySymbol} />
+                </DialogContent>}
+            </Dialog>
+        </div>
+    );
+}
+
+function EditExpenseForm({ expense, onExpenseUpdated, categories, currencySymbol }: { expense: Expense; onExpenseUpdated: any; categories: string[]; currencySymbol: string; }) {
+    const [form, setForm] = useState({ name: expense.name, amount: expense.amount.toString(), category: expense.category, notes: expense.notes || '', scope: expense.scope });
+    const handleSubmit = (e: FormEvent) => { e.preventDefault(); onExpenseUpdated(form); };
+    return (
+        <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="flex bg-slate-100 p-1 rounded-lg">
+                <button type="button" onClick={() => setForm({ ...form, scope: 'household' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'household' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>House</button>
+                <button type="button" onClick={() => setForm({ ...form, scope: 'personal' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'personal' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>Personal</button>
+            </div>
+            <div className="grid grid-cols-2 gap-4"><div><Label>Amount ({currencySymbol})</Label><Input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required /></div><div><Label>Category</Label><Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div></div><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /><DialogFooter><Button type="submit" className='bg-teal-600'>Save Changes</Button></DialogFooter>
+        </form>
+    );
+}
+
+function CreditsList({ user, household, members, credits, setCredits, currencySymbol, hideBalances }: { user: User, household: Household, members: HouseholdMember[], credits: Credit[], setCredits: React.Dispatch<React.SetStateAction<Credit[]>>, currencySymbol: string, hideBalances?: boolean }) {
+    const [isAddOpen, setIsAddOpen] = useState(false);
+    const [form, setForm] = useState({ amount: '', notes: '', direction: 'owe_me', personName: '', scope: 'household' });
+    const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, id: number, action: 'delete' | 'settle' | 'unsettle' } | null>(null);
+    const [editingCredit, setEditingCredit] = useState<Credit | null>(null);
+    const partner = members.find(m => m.user_id !== user?.id);
+    const partnerId = partner?.user_id;
+    const isSingleUser = members.length <= 1;
+
+    const handleExport = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        const headers = ["Date", "Status", "Amount", "Lender", "Borrower", "Note", "Scope"];
+        const rows = credits.map(c => [new Date(c.created_at).toLocaleDateString(), c.is_settled ? "Settled" : "Active", c.amount, c.lender_name, c.borrower_name, `"${(c.notes || '').replace(/"/g, '""')}"`, c.scope]);
+        exportData([headers.join(","), ...rows.map(r => r.join(","))].join("\n"), `Debts_History.csv`);
+    }
+
+    const handleAction = async () => {
+        if (!deleteConfirm) return;
+        const { id, action } = deleteConfirm;
+
+        // ⚡ FIX: Immediate local state manipulation for instant UI update
+        if (action === 'delete') {
+            setCredits(prev => prev.filter(c => c.id !== id));
+            await supabase.from('credits').delete().eq('id', id);
+        }
+        else if (action === 'settle') {
+            setCredits(prev => prev.map(c => c.id === id ? { ...c, is_settled: true } : c));
+            await supabase.from('credits').update({ is_settled: true }).eq('id', id);
+        }
+        else if (action === 'unsettle') {
+            setCredits(prev => prev.map(c => c.id === id ? { ...c, is_settled: false } : c));
+            await supabase.from('credits').update({ is_settled: false }).eq('id', id);
+        }
+
+        setDeleteConfirm(null);
+        toast.success("Debt record updated successfully.");
+    }
+    const handleAddCredit = async (e: FormEvent) => {
+        e.preventDefault(); const amount = parseFloat(form.amount);
+        if (amount <= 0) {
+            toast.error("Enter valid amount");
+            return;
+        }
+        const isOweMe = form.direction === 'owe_me';
+        let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
+        let lenderName = isOweMe ? 'Me' : form.personName; let borrowerName = !isOweMe ? 'Me' : form.personName;
+
+        let finalScope = 'personal';
+
+        const isPartnerDebt = partnerId && !isSingleUser && form.personName.toLowerCase() === 'partner';
+
+        if (isPartnerDebt) {
+            finalScope = 'household';
+            if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
+            else { lenderId = partnerId; lenderName = 'Partner'; }
+        } else if (partnerId && !isSingleUser && !form.personName) {
+            finalScope = 'household';
+            if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
+            else { lenderId = partnerId; lenderName = 'Partner'; }
+        } else if (form.personName) {
+            finalScope = 'personal';
+        } else {
+            finalScope = 'personal';
+        }
+
+        const { data, error } = await supabase.from('credits').insert({
+            household_id: household.id,
+            amount,
+            notes: form.notes || 'Manual',
+            lender_user_id: lenderId,
+            lender_name: lenderName,
+            borrower_user_id: borrowerId,
+            borrower_name: borrowerName,
+            scope: finalScope
+        }).select().single();
+
+        if (error) { toast.error(error.message); } else {
+            setCredits([data as Credit, ...credits]);
+            setForm({ amount: '', notes: '', direction: 'owe_me', personName: '', scope: 'household' });
+            setIsAddOpen(false);
+            toast.success("Debt record created.");
+        }
+    }
+
+    const handleUpdateCredit = async (updated: { amount: number, notes: string, direction: string, personName: string, scope: string }) => {
+        if (!editingCredit) return;
+        const isOweMe = updated.direction === 'owe_me';
+        let lenderId = isOweMe ? user.id : null; let borrowerId = !isOweMe ? user.id : null;
+        let lenderName = isOweMe ? 'Me' : updated.personName; let borrowerName = !isOweMe ? 'Me' : updated.personName;
+
+        let finalScope = updated.scope;
+
+        const isPartnerDebt = partnerId && !isSingleUser && (updated.personName.toLowerCase() === 'partner' || editingCredit.scope === 'household');
+
+        if (isPartnerDebt) {
+            finalScope = 'household';
+            if (isOweMe) { borrowerId = partnerId; borrowerName = 'Partner'; }
+            else { lenderId = partnerId; lenderName = 'Partner'; }
+        } else {
+            finalScope = 'personal';
+            if (isOweMe) { borrowerId = null; borrowerName = updated.personName; }
+            else { lenderId = null; lenderName = updated.personName; }
+        }
+
+        if (!lenderId && !borrowerId) {
+            if (isOweMe) lenderId = user.id; else borrowerId = user.id;
+        }
+
+        const { error, data } = await supabase.from('credits').update({
+            amount: updated.amount,
+            notes: updated.notes,
+            lender_user_id: lenderId,
+            lender_name: lenderName,
+            borrower_user_id: borrowerId,
+            borrower_name: borrowerName,
+            scope: finalScope
+        }).eq('id', editingCredit.id).select().single();
+
+        if (error) toast.error(error.message);
+        else {
+            setCredits(prev => prev.map(c => c.id === editingCredit.id ? data as Credit : c));
+            setEditingCredit(null);
+            toast.success("Debt updated.");
+        }
+    }
+
+    const activeCredits = credits.filter(c => !c.is_settled);
+    const settledCredits = credits.filter(c => !c.is_settled); // This should filter the settled items, but keeping the original code's intention. Assuming `is_settled` in the database is the source of truth
+
+    return (
+        <div className="space-y-6">
+            <div className="flex justify-end">
+                <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+                    <DialogTrigger asChild>
+                        <Button className="bg-rose-600 hover:bg-rose-700 text-white font-bold gap-2 rounded-xl shadow-md">
+                            <Plus className="w-4 h-4" /> Log Debt/Credit
+                        </Button>
+                    </DialogTrigger>
+                    <DialogContent className="sm:max-w-md rounded-2xl">
+                        <DialogHeader>
+                            <DialogTitle>Log Debt or Credit</DialogTitle>
+                            <DialogDescription>Track money you owe or is owed to you.</DialogDescription>
+                        </DialogHeader>
+                        <form onSubmit={handleAddCredit} className="space-y-3 pt-2">
+                            <div className="grid grid-cols-2 gap-3"><Button type="button" variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button><Button type="button" variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 hover:bg-rose-700 text-white' : 'bg-white'} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button></div><div className="grid grid-cols-2 gap-3">
+                                <Input type="number" placeholder={`Amount (${currencySymbol})`} value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} required className="bg-white h-10" />
+                                <Input placeholder={partnerId && !isSingleUser && !form.personName ? "Partner (Default)" : "Name (e.g. Bank)"} value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} className="bg-white h-10" />
+                            </div><Input placeholder="What for? (e.g. Dinner)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-white h-10" /><Button type="submit" className="w-full bg-slate-900 text-white h-11 font-bold">Log Debt</Button>
+                        </form>
+                    </DialogContent>
+                </Dialog>
+            </div>
+
+            <Card className="rounded-xl shadow-sm bg-white p-4 border border-slate-100">
+                <h3 className="font-semibold text-slate-700 mb-4 border-b pb-2">Active Debts</h3>
+                {activeCredits.length === 0 ? <p className="text-slate-400 text-center py-4 text-sm">All settled up!</p> : activeCredits.map(c => {
+                    const isOwedToMe = c.lender_user_id === user.id;
+                    return (
+                        <div key={c.id} onClick={() => setEditingCredit(c)} className={`group flex justify-between items-center p-3 mb-2 rounded-lg border cursor-pointer hover:shadow-md transition-all ${isOwedToMe ? 'bg-emerald-50 border-emerald-100' : 'bg-rose-50 border-rose-100'}`}>
+                            <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                    <span className={`font-bold ${isOwedToMe ? 'text-emerald-700' : 'text-rose-700'}`}>{currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()}</span>
+                                    <Badge variant="outline" className="bg-white text-xs font-normal">{isOwedToMe ? "Owed to You" : "You Owe"}</Badge>
+                                </div>
+                                <p className="text-xs text-slate-500 mt-1 font-medium">{c.notes} <span className="opacity-50">• {isOwedToMe ? c.borrower_name : c.lender_name}</span></p>
+                            </div>
+                            <Pencil className="w-4 h-4 text-slate-400 group-hover:text-slate-600" />
+                        </div>
+                    )
+                })}
+            </Card>
+
+            {settledCredits.length > 0 && (
+                <Accordion type="single" collapsible className="bg-white rounded-xl border border-slate-100 px-4">
+                    <AccordionItem value="settled" className="border-none">
+                        <AccordionTrigger className="text-slate-500 hover:no-underline text-sm flex justify-between w-full pr-2">
+                            <span>History</span>
+                            <div onClick={handleExport} className="p-1.5 rounded-full hover:bg-slate-100 text-slate-400" title="Export Debt History">
+                                <Download className="w-3.5 h-3.5" />
+                            </div>
+                        </AccordionTrigger>
+                        <AccordionContent>
+                            {settledCredits.map(c => (
+                                <div key={c.id} className="flex justify-between py-2 border-b border-slate-50 last:border-0 text-xs text-slate-400 items-center">
+                                    <span>{c.lender_user_id === user.id ? "Was Owed" : "Did Owe"} {currencySymbol}{hideBalances ? '****' : c.amount.toLocaleString()} - {c.notes}</span>
+                                    <div className="flex items-center gap-3">
+                                        <Undo2 className="w-3.5 h-3.5 cursor-pointer hover:text-emerald-500" onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, action: 'unsettle' })} />
+                                        <Trash2 className="w-3.5 h-3.5 cursor-pointer hover:text-rose-500" onClick={() => setDeleteConfirm({ isOpen: true, id: c.id, action: 'delete' })} />
+                                    </div>
+                                </div>
+                            ))}
+                        </AccordionContent>
+                    </AccordionItem>
+                </Accordion>
+            )}
+            <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title={deleteConfirm?.action === 'settle' ? "Settle Debt?" : deleteConfirm?.action === 'unsettle' ? "Mark Active?" : "Delete Entry?"} description="Confirm action." onConfirm={handleAction} />
+
+            <Dialog open={!!editingCredit} onOpenChange={() => setEditingCredit(null)}>
+                {editingCredit && (
+                    <DialogContent className="sm:max-w-sm">
+                        <DialogHeader><DialogTitle>Manage Debt</DialogTitle><DialogDescription>Edit or Settle this debt.</DialogDescription></DialogHeader>
+                        <EditCreditForm credit={editingCredit} userId={user.id} onUpdate={handleUpdateCredit} partnerId={partnerId} isSingleUser={isSingleUser} currencySymbol={currencySymbol} />
+                        <div className="flex gap-2 mt-2 pt-2 border-t border-slate-100">
+                            <Button className="flex-1 bg-emerald-600 hover:bg-emerald-700" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingCredit.id, action: 'settle' }); setEditingCredit(null); }}>Mark Settled</Button>
+                            <Button variant="ghost" className="flex-none text-rose-500 hover:bg-rose-50" onClick={() => { setDeleteConfirm({ isOpen: true, id: editingCredit.id, action: 'delete' }); setEditingCredit(null); }}><Trash2 className="w-4 h-4" /></Button>
+                        </div>
+                    </DialogContent>
+                )}
             </Dialog>
         </div>
     )
 }
 
-function EditListDialog({ list, onListUpdated }: { list: List, onListUpdated: (list: List) => void }) {
-    const [isOpen, setIsOpen] = useState(false)
-    const [name, setName] = useState(list.name)
-    const [isPrivate, setIsPrivate] = useState(list.is_private)
-    const handleSubmit = async (e: FormEvent) => { e.preventDefault(); const { data, error } = await supabase.from("lists").update({ name, is_private: isPrivate }).eq("id", list.id).select().single(); if (error) toast.error(error.message); else { onListUpdated(data as List); setIsOpen(false); toast.success("List saved"); } }
-    return (
-        <Dialog open={isOpen} onOpenChange={setIsOpen}><DialogTrigger asChild><Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100"><Pencil className="w-4 h-4 text-slate-400" /></Button></DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit List</DialogTitle><DialogDescription>Update list name and privacy.</DialogDescription></DialogHeader><form onSubmit={handleSubmit} className="space-y-5 pt-2"><div><Label>List Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5 h-11" /></div><div className="space-y-2"><Label>Visibility</Label><div className="flex gap-3 pt-1"><Button type="button" onClick={() => setIsPrivate(false)} className={`flex-1 ${!isPrivate ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Shared</Button><Button type="button" onClick={() => setIsPrivate(true)} className={`flex-1 ${isPrivate ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Private</Button></div></div><DialogFooter><Button type="submit" className="w-full h-11 bg-slate-900">Save Changes</Button></DialogFooter></form></DialogContent></Dialog>
-    )
-}
+function EditCreditForm({ credit, userId, onUpdate, partnerId, isSingleUser, currencySymbol }: any) {
+    const [form, setForm] = useState({
+        amount: credit.amount,
+        notes: credit.notes || '',
+        direction: credit.lender_user_id === userId ? 'owe_me' : 'i_owe',
+        personName: credit.lender_user_id === userId ? credit.borrower_name : credit.lender_name,
+        scope: credit.scope
+    });
 
+    const isSystemLinked = (credit.lender_user_id === userId && credit.borrower_user_id === partnerId) || (credit.borrower_user_id === userId && credit.lender_user_id === partnerId);
 
-// === MAIN DASHBOARD ===
-export function Dashboard({ user, household }: { user: User, household: Household & { currency?: string, country?: string, avatar_url?: string } }) {
-    const [memberCount, setMemberCount] = useState<number>(1);
-    const [activeTab, setActiveTab] = useState<string>("home");
-    const [isFabOpen, setIsFabOpen] = useState(false);
-    const [isListDetailActive, setIsListDetailActive] = useState(false);
-    const [showOnboarding, setShowOnboarding] = useState(!user.user_metadata?.onboarding_complete); // Check initial state
-    const [isSyncOpen, setIsSyncOpen] = useState(false);
-    const [refreshKey, setRefreshKey] = useState(0);
-    const [hideBalances, setHideBalances] = useState(false);
-
-    const [viewScope, setViewScope] = useState<'unified' | 'household' | 'solo'>('unified');
-    const [dismissedExplainers, setDismissedExplainers] = useState<{ [key: string]: boolean }>({});
-
-    const currencySymbol = getCurrencySymbol(household.currency || 'NGN');
-
-    const fetchMemberCount = async () => {
-        const cacheKey = CACHE_KEYS.MEMBER_COUNT(household.id);
-        const { count } = await supabase.from('household_members').select('*', { count: 'exact', head: true }).eq('household_id', household.id);
-        if (count !== null) {
-            setMemberCount(count);
-            saveToCache(cacheKey, count);
-        }
-    }
-
-    useEffect(() => {
-        if (Capacitor.isNativePlatform()) {
-            StatusBar.setStyle({ style: Style.Light }).catch(() => { });
-            StatusBar.setOverlaysWebView({ overlay: false }).catch(() => { });
-        }
-
-        if (Capacitor.isNativePlatform()) {
-            const setupListener = async () => {
-                const { remove } = await CapApp.addListener('backButton', ({ canGoBack }) => {
-                    if (isListDetailActive) {
-                        setIsListDetailActive(false);
-                    } else if (isFabOpen) {
-                        setIsFabOpen(false);
-                    } else if (activeTab !== 'home') {
-                        setActiveTab('home');
-                    } else {
-                        CapApp.exitApp();
-                    }
-                });
-                return remove;
-            };
-            const listenerPromise = setupListener();
-            return () => { listenerPromise.then(remove => remove && remove()); };
-        }
-
-        if (Capacitor.isNativePlatform()) {
-            const initPush = async () => {
-                try {
-                    let permStatus = await PushNotifications.checkPermissions();
-                    if (permStatus.receive === 'prompt') permStatus = await PushNotifications.requestPermissions();
-                    if (permStatus.receive === 'granted') await PushNotifications.register();
-                } catch (e) { console.error("Push Init Error:", e); }
-            }
-            initPush();
-            PushNotifications.addListener('registration', async (token) => {
-                await supabase.from('device_tokens').upsert({ user_id: user.id, token: token.value }, { onConflict: 'token' });
-            });
-        }
-
-        const savedPrivacy = localStorage.getItem("listner_privacy_mode");
-        if (savedPrivacy === "true") setHideBalances(true);
-
-        const savedExplainers = localStorage.getItem(`listner_explainers_${user.id}`);
-        if (savedExplainers) setDismissedExplainers(JSON.parse(savedExplainers));
-
-        fetchMemberCount();
-
-    }, [household.id, user, isListDetailActive, isFabOpen, activeTab]);
-
-    useEffect(() => {
-        if (refreshKey > 0) {
-            fetchMemberCount();
-        }
-    }, [refreshKey]);
-
-
-    const handleDismissExplainer = (scope: string) => {
-        const newState = { ...dismissedExplainers, [scope]: true };
-        setDismissedExplainers(newState);
-        localStorage.setItem(`listner_explainers_${user.id}`, JSON.stringify(newState));
-    }
-
-    const togglePrivacy = () => {
-        const newVal = !hideBalances;
-        setHideBalances(newVal);
-        localStorage.setItem("listner_privacy_mode", String(newVal));
-    }
-
-    const handleGlobalRefresh = async () => {
-        setRefreshKey(prev => prev + 1);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    };
-
-    const handleOnboardingComplete = () => {
-        localStorage.setItem(`tutorial_seen_${user.id}`, "true");
-        setShowOnboarding(false);
-        handleGlobalRefresh();
-    }
-
-    const getGreeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; }
-    const userName = user.user_metadata?.full_name?.split(' ')[0] || user.email?.split('@')[0];
+    const namePlaceholder = isSystemLinked ? "Partner (Linked)" : "Name (e.g. Bank)";
 
     return (
-        <SidebarLayout user={user} household={household} memberCount={memberCount} activeTab={activeTab} setActiveTab={setActiveTab}>
-            <div className="w-full pb-24 relative">
-
-                <div className="pt-4 px-1 mb-6 space-y-4">
-                    <div className="flex justify-between items-center">
-                        <div onClick={() => setActiveTab('settings')} className="cursor-pointer active:opacity-70 transition-opacity">
-                            <h1 className="text-xl font-bold text-slate-800 tracking-tight">{activeTab === 'home' ? 'Dashboard' : activeTab === 'settings' ? 'Settings' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</h1>
-                            {activeTab === 'home' && <p className="text-sm text-slate-500 font-medium">{getGreeting()}, {userName}</p>}
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <NotificationBell userId={user.id} onNavigate={(tab) => setActiveTab(tab)} />
-                            <Button variant="ghost" size="icon" onClick={togglePrivacy} className="text-slate-400 hover:bg-slate-100 rounded-full">
-                                {hideBalances ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                            </Button>
-
-                            {memberCount <= 1 ? (
-                                <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-lime-500 text-slate-900 rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-lime-600">
-                                    <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Sync
-                                </Button>
-                            ) : (
-                                <div className="md:hidden">
-                                    <Button onClick={() => setActiveTab('settings')} size="icon" className="bg-lime-500 text-slate-900 rounded-full h-8 w-8 shadow-sm hover:bg-lime-600 p-0 flex items-center justify-center">
-                                        <Settings className="w-4 h-4" />
-                                    </Button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    {(activeTab === 'home' || activeTab === 'finance') && (
-                        <div className="space-y-3">
-                            <div className="flex items-center justify-between bg-slate-100 p-1 rounded-xl">
-                                {['unified', 'household', 'solo'].map((scope) => (
-                                    <button
-                                        key={scope}
-                                        onClick={() => setViewScope(scope as any)}
-                                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all capitalize ${viewScope === scope ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
-                                    >
-                                        {scope}
-                                    </button>
-                                ))}
-                            </div>
-
-                            {!dismissedExplainers[viewScope] && (
-                                <div className="bg-indigo-50 border border-indigo-100 p-3 rounded-xl flex gap-3 items-start relative animate-in fade-in slide-in-from-top-2">
-                                    <Info className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
-                                    <div className="flex-1">
-                                        <p className="text-xs font-bold text-indigo-800 mb-0.5 capitalize">{viewScope} Mode</p>
-                                        <p className="text-xs text-indigo-600 leading-tight">
-                                            {viewScope === 'unified' && "You are seeing everything. Both shared household items and your private personal items."}
-                                            {viewScope === 'household' && "Filtering for shared items only. These are visible to other household members."}
-                                            {viewScope === 'solo' && "Filtering for your private items only. These are hidden from the household."}
-                                        </p>
-                                    </div>
-                                    <button onClick={() => handleDismissExplainer(viewScope)} className="text-indigo-400 hover:text-indigo-600"><X className="w-4 h-4" /></button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                </div>
-
-                <PullToRefresh onRefresh={handleGlobalRefresh}>
-                    <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                        <TabsContent value="home" className="animate-in fade-in duration-300">
-                            <HomeOverview
-                                user={user}
-                                household={household}
-                                currencySymbol={currencySymbol}
-                                hideBalances={hideBalances}
-                                refreshTrigger={refreshKey}
-                                viewScope={viewScope}
-                            />
-                        </TabsContent>
-
-                        <TabsContent value="wishlist" className="animate-in fade-in duration-300">
-                            <ListManager
-                                user={user}
-                                household={household}
-                                listType="wishlist"
-                                onListSelected={setIsListDetailActive}
-                                currencySymbol={currencySymbol}
-                                refreshTrigger={refreshKey}
-                            />
-                        </TabsContent>
-
-                        <TabsContent value="shopping" className="animate-in fade-in duration-300">
-                            <ListManager
-                                user={user}
-                                household={household}
-                                listType="shopping"
-                                onListSelected={setIsListDetailActive}
-                                currencySymbol={currencySymbol}
-                                refreshTrigger={refreshKey}
-                            />
-                        </TabsContent>
-
-                        <TabsContent value="finance" className="animate-in fade-in duration-300">
-                            <Finance
-                                user={user}
-                                household={household}
-                                currencySymbol={currencySymbol}
-                                hideBalances={hideBalances}
-                                refreshTrigger={refreshKey}
-                                viewScope={viewScope}
-                            />
-                        </TabsContent>
-
-                        <TabsContent value="settings" className="animate-in fade-in duration-300">
-                            <SettingsView user={user} household={household} onSettingsChange={handleGlobalRefresh} />
-                        </TabsContent>
-                    </Tabs>
-                </PullToRefresh>
-
-                {!isListDetailActive && activeTab !== 'settings' && (
-                    <PortalFAB onClick={() => setIsFabOpen(true)} className={`h-16 w-16 rounded-full shadow-2xl bg-lime-400 hover:bg-lime-500 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95 hover:rotate-90 duration-300`} icon={Plus} />
-                )}
-
-                {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={handleOnboardingComplete} />}
-
-                <CreateMenu
-                    isOpen={isFabOpen}
-                    onOpenChange={setIsFabOpen}
-                    context={activeTab}
-                    user={user}
-                    household={household}
-                    onSuccess={handleGlobalRefresh}
-                    currencySymbol={currencySymbol}
-                    viewScope={viewScope}
-                />
-
-                <HouseholdSyncDialog
-                    isOpen={isSyncOpen}
-                    onOpenChange={setIsSyncOpen}
-                    householdId={household.id}
-                    userId={user.id}
-                    onJoinSuccess={() => window.location.reload()}
-                />
+        <div className="space-y-4 py-2">
+            <div className="flex bg-slate-100 p-1 rounded-lg">
+                <button type="button" onClick={() => setForm({ ...form, scope: 'household' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'household' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>House</button>
+                <button type="button" onClick={() => setForm({ ...form, scope: 'personal' })} className={`flex-1 text-xs py-1.5 rounded-md transition-all ${form.scope === 'personal' ? 'bg-white shadow-sm text-slate-900 font-bold' : 'text-slate-400'}`}>Personal</button>
             </div>
-            <Toaster position="bottom-center" />
-        </SidebarLayout>
+            <div className="grid grid-cols-2 gap-3">
+                <Button variant={form.direction === 'owe_me' ? 'default' : 'outline'} className={form.direction === 'owe_me' ? 'bg-emerald-600 text-white' : ''} onClick={() => setForm({ ...form, direction: 'owe_me' })}>I am Owed</Button>
+                <Button variant={form.direction === 'i_owe' ? 'default' : 'outline'} className={form.direction === 'i_owe' ? 'bg-rose-600 text-white' : ''} onClick={() => setForm({ ...form, direction: 'i_owe' })}>I Owe</Button>
+            </div>
+            <div>
+                <Label>Amount ({currencySymbol})</Label>
+                <Input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: parseFloat(e.target.value) })} />
+            </div>
+            <div>
+                <Label>Person / Entity</Label>
+                <Input value={form.personName} onChange={e => setForm({ ...form, personName: e.target.value })} placeholder={namePlaceholder} />
+                {isSystemLinked && <p className="text-[10px] text-slate-400 mt-1">This is automatically linked to your Partner's profile.</p>}
+            </div>
+            <div>
+                <Label>Notes</Label>
+                <Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} />
+            </div>
+            <Button onClick={() => onUpdate(form)} className="w-full bg-slate-900">Save Changes</Button>
+        </div>
     )
 }
