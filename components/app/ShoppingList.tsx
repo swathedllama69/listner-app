@@ -1,22 +1,21 @@
 //
 "use client"
 
-import { useState, useEffect, FormEvent, ChangeEvent, useMemo, useRef } from "react"
+import { useState, useEffect, useRef, FormEvent, ChangeEvent } from "react"
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import {
-    Trash2, CheckCircle, Hand, ChevronUp, ChevronDown,
-    Share2, Settings, Pencil, Lock, Globe, Plus, AlertCircle,
-    Copy, FileText, ListChecks, Lightbulb, MoreHorizontal, ArrowUpDown, TrendingUp, AlertTriangle, Info, CloudOff, ShoppingBag, CheckCircle2, X, ArrowDownCircle
+    Trash2, CheckCircle, Pencil, Globe, Plus,
+    Share2, Settings, MoreHorizontal, ArrowUpDown, AlertTriangle,
+    Info, CloudOff, ShoppingBag, ArrowDownCircle, Search
 } from "lucide-react"
 import { List } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger, DropdownMenuRadioGroup, DropdownMenuRadioItem } from "@/components/ui/dropdown-menu"
@@ -26,7 +25,6 @@ import { SyncQueue } from "@/lib/syncQueue"
 import { Progress } from "@/components/ui/progress"
 import { Capacitor } from "@capacitor/core"
 import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics"
-import { Virtuoso } from 'react-virtuoso'
 import toast from 'react-hot-toast'
 
 type ShoppingItem = {
@@ -46,14 +44,14 @@ const getPriorityBorderClass = (priority: string) => {
     }
 };
 
+// ⚡ RE-DESIGNED FAB: Ensures no blocking of content
 function PortalFAB({ onClick, className, icon: Icon }: any) {
     const [mounted, setMounted] = useState(false);
     useEffect(() => setMounted(true), []);
     if (!mounted) return null;
     return createPortal(
-        // ⚡ FIX: Added pointer-events-none to container, auto to button to fix unclickable list
-        <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-[100] pointer-events-none">
-            <Button onClick={onClick} className={`${className} pointer-events-auto`}>
+        <div className="fixed bottom-24 right-4 md:bottom-10 md:right-10 z-[50] pointer-events-none">
+            <Button onClick={onClick} className={`${className} pointer-events-auto shadow-2xl`}>
                 <Icon className="w-8 h-8" />
             </Button>
         </div>,
@@ -61,7 +59,14 @@ function PortalFAB({ onClick, className, icon: Icon }: any) {
     );
 }
 
-// ... [AlertDialog and ConfirmDialog components remain unchanged] ...
+function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
+    return (
+        <Dialog open={isOpen} onOpenChange={onOpenChange}>
+            <DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2 text-rose-600"><AlertTriangle className="w-5 h-5" /> {title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader><DialogFooter className="flex gap-2 sm:justify-end"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button></DialogFooter></DialogContent>
+        </Dialog>
+    )
+}
+
 function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -73,14 +78,6 @@ function AlertDialog({ isOpen, onOpenChange, title, description }: { isOpen: boo
     )
 }
 
-function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
-    return (
-        <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-sm rounded-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2 text-rose-600"><AlertTriangle className="w-5 h-5" /> {title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader><DialogFooter className="flex gap-2 sm:justify-end"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button></DialogFooter></DialogContent>
-        </Dialog>
-    )
-}
-
 export function ShoppingList({ user, list, currencySymbol }: { user: User, list: List, currencySymbol: string }) {
     const [items, setItems] = useState<ShoppingItem[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -88,8 +85,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const [usingCachedData, setUsingCachedData] = useState(false);
 
     const [sortBy, setSortBy] = useState("priority");
-    const [filterTime, setFilterTime] = useState("all");
-
     const [isRenameOpen, setIsRenameOpen] = useState(false)
     const [isAddOpen, setIsAddOpen] = useState(false)
     const [deleteConfirm, setDeleteConfirm] = useState<{ isOpen: boolean, type: 'item' | 'list' | 'bulk' | 'completed', id?: number } | null>(null)
@@ -99,11 +94,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
     const [listSettings, setListSettings] = useState({ name: list.name, isPrivate: list.is_private })
     const [form, setForm] = useState({ name: "", quantity: "1", price: "", notes: "", priority: "Medium" })
 
-    const [visibleCount, setVisibleCount] = useState(20);
     const inputRef = useRef<HTMLInputElement>(null)
-
-    const isOwner = user.id === list.owner_id;
-    const showAlert = (title: string, desc: string) => setAlertInfo({ isOpen: true, title, desc });
 
     const triggerHaptic = async (style: ImpactStyle = ImpactStyle.Light) => {
         if (Capacitor.isNativePlatform()) {
@@ -117,7 +108,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         }
     }
 
-    // ... [useEffect for data loading remains unchanged] ...
     useEffect(() => {
         let isMounted = true;
         const cacheKey = CACHE_KEYS.SHOPPING_LIST(list.id);
@@ -128,8 +118,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 setItems(cachedData);
                 setUsingCachedData(true);
                 setIsLoading(false);
-            } else if (isMounted) {
-                setIsLoading(true);
             }
 
             const { data, error } = await supabase.from("shopping_items").select("*").eq("list_id", list.id);
@@ -138,6 +126,8 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                 setItems(data as ShoppingItem[]);
                 saveToCache(cacheKey, data);
                 setUsingCachedData(false);
+                setIsLoading(false);
+            } else if (error && isMounted && !cachedData) {
                 setIsLoading(false);
             }
         };
@@ -155,12 +145,11 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         return () => { isMounted = false; supabase.removeChannel(channel) }
     }, [list.id])
 
-    // ... [Helper functions: handleFormChange, handleCopyText, etc. remain unchanged] ...
     const handleFormChange = (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [e.target.name]: e.target.value });
     const handlePriorityChange = (value: string) => setForm({ ...form, priority: value });
 
     const handleCopyText = () => {
-        const text = items.map(i => `- ${i.name}`).join('\n');
+        const text = items.map(i => `- ${i.name} ${i.is_complete ? '(Done)' : ''}`).join('\n');
         navigator.clipboard.writeText(text);
         triggerHaptic(ImpactStyle.Medium);
         toast.success("List copied to clipboard.");
@@ -329,10 +318,6 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
         return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
     });
 
-    const visibleItems = processedItems.slice(0, visibleCount);
-    const hasMore = visibleCount < processedItems.length;
-    const loadMore = () => setVisibleCount(prev => Math.min(prev + 25, processedItems.length));
-
     const completedItems = items.filter(item => item.is_complete);
     const totalItems = items.length;
     const totalCompleted = completedItems.length;
@@ -340,173 +325,157 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
 
     const total = processedItems.reduce((sum, i) => sum + ((i.price || 0) * (parseInt(i.quantity || '1'))), 0);
     const isBulkMode = selectedItems.length > 0;
-    const formPrice = parseFloat(form.price) || 0;
-    const formQty = parseInt(form.quantity) || 1;
-    const formTotal = formPrice * formQty;
 
-    // ⚡ FIX: Removed z-20 to avoid layer conflict with popups/portal
     return (
-        <Card className={`w-full rounded-2xl shadow-xl bg-white/80 backdrop-blur-sm relative border-none min-h-[80vh] flex flex-col`}>
-            {/* Header Section */}
-            <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
-                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                <div className="relative z-10">
-                    <div className="flex items-center gap-2 mb-1">
-                        <h2 className="text-xl font-bold truncate max-w-[200px]">{listSettings.name}</h2>
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>{listSettings.isPrivate ? 'Private' : 'Shared'}</span>
-                        {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
+        <div className="flex flex-col h-full max-w-4xl mx-auto w-full relative">
+            <Card className="rounded-2xl shadow-md border-none flex flex-col overflow-hidden bg-white/95 backdrop-blur-md z-10">
+                {/* Header Section */}
+                <div className="bg-slate-900 text-white px-5 py-4 shadow-sm flex items-center justify-between">
+                    <div className="relative z-10">
+                        <div className="flex items-center gap-2 mb-1">
+                            <h2 className="text-lg font-bold truncate max-w-[200px]">{listSettings.name}</h2>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>{listSettings.isPrivate ? 'Private' : 'Shared'}</span>
+                            {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
+                        </div>
+                        <p className="text-xs text-slate-400 font-medium flex items-center gap-2">
+                            <ShoppingBag className="w-3 h-3" /> {items.length} items
+                            <span className="w-1 h-1 bg-slate-500 rounded-full"></span>
+                            {totalCompleted} done
+                        </p>
                     </div>
-                    <p className="text-xs text-slate-400 font-medium flex items-center gap-2">
-                        <ShoppingBag className="w-3 h-3" /> {items.length} total items
-                        <span className="w-1 h-1 bg-slate-500 rounded-full"></span>
-                        {totalCompleted} completed
-                    </p>
+                    <div className="relative z-10 text-right">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Total</p>
+                        <div className="text-xl font-bold text-lime-400">{currencySymbol}{total.toLocaleString()}</div>
+                    </div>
                 </div>
-                <div className="relative z-10 text-right">
-                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-0.5">Remaining Est.</p>
-                    <div className="text-2xl font-bold text-lime-400">{currencySymbol}{total.toLocaleString()}</div>
-                </div>
-            </div>
 
-            {/* Progress Bar */}
-            <div className="bg-slate-900 pb-1">
-                <Progress value={progressPercent} className="h-1.5 bg-slate-800 rounded-none" indicatorClassName="bg-lime-500" />
-            </div>
-
-            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-                <div className="flex gap-2">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="h-8 text-xs gap-1 bg-white"><ArrowUpDown className="w-3 h-3" /> Sort</Button></DropdownMenuTrigger>
-                        <DropdownMenuContent align="start">
-                            <DropdownMenuLabel>Sort By</DropdownMenuLabel>
-                            <DropdownMenuRadioGroup value={sortBy} onValueChange={setSortBy}>
-                                <DropdownMenuRadioItem value="priority">Priority</DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="price">Price (High)</DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="date">Date Added</DropdownMenuRadioItem>
-                            </DropdownMenuRadioGroup>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuLabel>Filter</DropdownMenuLabel>
-                            <DropdownMenuRadioGroup value={filterTime} onValueChange={setFilterTime}>
-                                <DropdownMenuRadioItem value="all">All Time</DropdownMenuRadioItem>
-                                <DropdownMenuRadioItem value="month">This Month</DropdownMenuRadioItem>
-                            </DropdownMenuRadioGroup>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
+                {/* Progress Bar */}
+                <div className="bg-slate-900 pb-1">
+                    <Progress value={progressPercent} className="h-1 bg-slate-800 rounded-none" indicatorClassName="bg-lime-500" />
                 </div>
-                <div className="flex gap-2">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleNativeShare}><Share2 className="w-4 h-4 text-slate-500" /></Button>
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><Settings className="w-4 h-4 text-slate-500" /></Button></DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setIsRenameOpen(true)}><Pencil className="w-4 h-4 mr-2" /> Rename</DropdownMenuItem>
-                            <DropdownMenuItem onClick={handleTogglePrivacy}><Globe className="w-4 h-4 mr-2" /> {listSettings.isPrivate ? "Make Public" : "Make Private"}</DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            {completedItems.length > 0 && (
-                                <DropdownMenuItem className="text-rose-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'completed' })}>
-                                    <Trash2 className="w-4 h-4 mr-2" /> Clear Completed
-                                </DropdownMenuItem>
-                            )}
-                            <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'list' })}><Trash2 className="w-4 h-4 mr-2" /> Delete List</DropdownMenuItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                </div>
-            </div>
 
-            <CardContent className="relative pt-4 pb-32 flex-1 px-2 md:px-6">
-                {isLoading ? <p className="text-center py-8 text-slate-400">Loading...</p> : (
+                <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+                    <div className="flex gap-2">
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild><Button variant="outline" size="sm" className="h-8 text-xs gap-1 bg-white border-slate-200"><ArrowUpDown className="w-3 h-3" /> Sort</Button></DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                                <DropdownMenuLabel>Sort By</DropdownMenuLabel>
+                                <DropdownMenuRadioGroup value={sortBy} onValueChange={setSortBy}>
+                                    <DropdownMenuRadioItem value="priority">Priority</DropdownMenuRadioItem>
+                                    <DropdownMenuRadioItem value="price">Price (High)</DropdownMenuRadioItem>
+                                    <DropdownMenuRadioItem value="date">Date Added</DropdownMenuRadioItem>
+                                </DropdownMenuRadioGroup>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                    <div className="flex gap-2">
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleNativeShare}><Share2 className="w-4 h-4 text-slate-500" /></Button>
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8"><Settings className="w-4 h-4 text-slate-500" /></Button></DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                                <DropdownMenuItem onClick={() => setIsRenameOpen(true)}><Pencil className="w-4 h-4 mr-2" /> Rename</DropdownMenuItem>
+                                <DropdownMenuItem onClick={handleTogglePrivacy}><Globe className="w-4 h-4 mr-2" /> {listSettings.isPrivate ? "Make Public" : "Make Private"}</DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                {completedItems.length > 0 && (
+                                    <DropdownMenuItem className="text-rose-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'completed' })}>
+                                        <Trash2 className="w-4 h-4 mr-2" /> Clear Completed
+                                    </DropdownMenuItem>
+                                )}
+                                <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'list' })}><Trash2 className="w-4 h-4 mr-2" /> Delete List</DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    </div>
+                </div>
+            </Card>
+
+            <div className="flex-1 pb-32 px-1 mt-3 overflow-y-auto">
+                {isLoading ? <div className="text-center py-10"><span className="loading loading-spinner text-slate-400">Loading...</span></div> : (
                     <>
-                        {visibleItems.length > 0 ? (
-                            <Virtuoso
-                                // ⚡ FIX: Removed minHeight constraint so footer (completed items) sits immediately below
-                                style={{ height: '100%' }}
-                                data={visibleItems}
-                                itemContent={(index, item) => {
+                        {/* ACTIVE ITEMS */}
+                        {processedItems.length > 0 ? (
+                            <div className="space-y-2">
+                                {processedItems.map((item, index) => {
                                     const hasPrice = item.price && item.price > 0;
                                     return (
                                         <div
                                             key={item.id}
-                                            className={`group flex justify-between items-center p-3 mb-2 rounded-xl border border-slate-100 bg-white hover:border-slate-300 transition-all ${getPriorityBorderClass(item.priority)} ${item.is_pending ? 'opacity-70' : ''}`}
+                                            className={`group flex justify-between items-center p-3 rounded-xl border bg-white shadow-sm hover:shadow-md transition-all ${getPriorityBorderClass(item.priority)} ${item.is_pending ? 'opacity-70' : ''}`}
                                         >
                                             <div className="flex items-center gap-3 flex-1 min-w-0">
-                                                <span className="text-xs font-bold text-black w-5 text-center">{index + 1}.</span>
-                                                <Checkbox checked={false} onCheckedChange={() => toggleComplete(item)} className="rounded-full w-5 h-5 border-2 border-slate-400 data-[state=checked]:bg-emerald-600 data-[state=checked]:border-emerald-600" />
-                                                <div className="flex-1 min-w-0 ml-1 cursor-pointer" onClick={() => setEditingItem(item)}>
-                                                    <div className="flex items-center gap-2 mb-0.5">
-                                                        <span className="font-semibold text-sm text-slate-900 truncate">{item.name}</span>
+                                                <Checkbox
+                                                    checked={false}
+                                                    onCheckedChange={() => toggleComplete(item)}
+                                                    className="rounded-full w-5 h-5 border-2 border-slate-300 data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500 transition-all"
+                                                />
+                                                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setEditingItem(item)}>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-semibold text-sm text-slate-800 truncate">{item.name}</span>
                                                         {item.is_pending && <CloudOff className="w-3 h-3 text-amber-500" />}
                                                     </div>
-                                                    {parseInt(item.quantity || '1') > 1 && <span className="text-xs font-bold text-lime-600 bg-lime-50 px-1.5 rounded">x{item.quantity}</span>}
-                                                    {item.notes && <span className="text-[10px] text-slate-400 truncate ml-2">{item.notes}</span>}
+                                                    <div className="flex items-center gap-2 mt-0.5">
+                                                        {parseInt(item.quantity || '1') > 1 && <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 rounded">x{item.quantity}</span>}
+                                                        {item.notes && <span className="text-[10px] text-slate-400 truncate max-w-[150px]">{item.notes}</span>}
+                                                    </div>
                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-2 pl-2">
-                                                <div className="text-right min-w-[60px]">
-                                                    {hasPrice ? (
-                                                        <span className="font-bold text-sm text-slate-700 block">{currencySymbol}{((item.price || 0) * parseInt(item.quantity || '1')).toLocaleString()}</span>
-                                                    ) : <span className="text-[10px] text-slate-300">--</span>}
-                                                </div>
+                                            <div className="flex items-center gap-1 pl-2">
+                                                {hasPrice && <span className="font-bold text-xs text-slate-600">{currencySymbol}{((item.price || 0) * parseInt(item.quantity || '1')).toLocaleString()}</span>}
                                                 <DropdownMenu>
                                                     <DropdownMenuTrigger asChild>
-                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-800 hover:bg-slate-50 rounded-full">
+                                                        <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-slate-600 rounded-full">
                                                             <MoreHorizontal className="w-4 h-4" />
                                                         </Button>
                                                     </DropdownMenuTrigger>
                                                     <DropdownMenuContent align="end">
-                                                        <DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Item</DropdownMenuItem>
+                                                        <DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit</DropdownMenuItem>
                                                         <DropdownMenuSeparator />
                                                         <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
                                                     </DropdownMenuContent>
                                                 </DropdownMenu>
                                             </div>
                                         </div>
-                                    );
-                                }}
-                                // ⚡ FIX: Moved Accordion to Footer so it scrolls WITH the content and sits directly below items
-                                components={{
-                                    Footer: () => (
-                                        <div className="pb-4">
-                                            {hasMore && (
-                                                <div className="flex justify-center py-4">
-                                                    <Button variant="outline" onClick={loadMore} className="gap-2 text-slate-500 border-slate-300">
-                                                        <ArrowDownCircle className="w-4 h-4" /> Load More ({processedItems.length - visibleCount} left)
-                                                    </Button>
-                                                </div>
-                                            )}
-                                            {completedItems.length > 0 && (
-                                                <Accordion type="single" collapsible className="mt-6 w-full">
-                                                    <AccordionItem value="completed" className="border-none">
-                                                        <AccordionTrigger className="text-slate-400 hover:text-slate-600 py-2 text-sm">Show Completed ({completedItems.length})</AccordionTrigger>
-                                                        <AccordionContent>
-                                                            <ul className="space-y-2 opacity-60">
-                                                                {completedItems.map((item) => (
-                                                                    <li key={item.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
-                                                                        <div className="flex items-center gap-3"><Checkbox checked={true} onCheckedChange={() => toggleComplete(item)} className="rounded-full" /><span className="line-through text-slate-500 text-sm">{item.name}</span></div>
-                                                                        <Button variant="ghost" size="icon" onClick={() => handleDeleteItem(item.id)} className="h-7 w-7"><Trash2 className="w-3.5 h-3.5 text-slate-400" /></Button>
-                                                                    </li>
-                                                                ))}
-                                                            </ul>
-                                                        </AccordionContent>
-                                                    </AccordionItem>
-                                                </Accordion>
-                                            )}
-                                        </div>
                                     )
-                                }}
-                            />
+                                })}
+                            </div>
                         ) : (
-                            <div className="text-center py-12 text-slate-400 flex flex-col items-center"><ListChecks className="w-12 h-12 opacity-20 mb-2" /> Your list is empty.</div>
+                            <div className="text-center py-16 flex flex-col items-center opacity-50">
+                                <ShoppingBag className="w-12 h-12 text-slate-300 mb-2" />
+                                <p className="text-slate-400 font-medium">List is empty</p>
+                            </div>
+                        )}
+
+                        {/* COMPLETED ITEMS - Moved to bottom naturally */}
+                        {completedItems.length > 0 && (
+                            <Accordion type="single" collapsible className="mt-6 border rounded-xl bg-slate-50/50">
+                                <AccordionItem value="completed" className="border-none">
+                                    <AccordionTrigger className="px-4 py-3 text-sm text-slate-500 hover:text-slate-700 hover:no-underline font-medium">
+                                        Completed Items ({completedItems.length})
+                                    </AccordionTrigger>
+                                    <AccordionContent className="px-2 pb-2">
+                                        <div className="space-y-1">
+                                            {completedItems.map((item) => (
+                                                <div key={item.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-100 transition-colors group">
+                                                    <div className="flex items-center gap-3">
+                                                        <Checkbox checked={true} onCheckedChange={() => toggleComplete(item)} className="rounded-full border-slate-300 data-[state=checked]:bg-slate-400 data-[state=checked]:border-slate-400" />
+                                                        <span className="line-through text-slate-400 text-sm">{item.name}</span>
+                                                    </div>
+                                                    <Button variant="ghost" size="icon" onClick={() => handleDeleteItem(item.id)} className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="w-3.5 h-3.5 text-rose-400" /></Button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </AccordionContent>
+                                </AccordionItem>
+                            </Accordion>
                         )}
                     </>
                 )}
-            </CardContent>
+            </div>
 
-            {/* Portal FAB and Dialogs remain ... */}
             <PortalFAB onClick={() => setIsAddOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95" icon={Plus} />
 
             <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
                 <DialogContent className="sm:max-w-md rounded-2xl top-[20%] translate-y-0">
-                    <DialogHeader><DialogTitle>Add Shopping Item</DialogTitle><DialogDescription>Add a new item to your shopping list.</DialogDescription></DialogHeader>
-                    <div className="bg-lime-50 border border-lime-100 p-3 rounded-lg text-xs text-lime-800 flex gap-2 items-start mb-2"><Lightbulb className="w-4 h-4 shrink-0 mt-0.5" /><div>Add items here. If you enter a price and quantity, the total cost will be calculated automatically.</div></div>
+                    <DialogHeader><DialogTitle>Add Item</DialogTitle><DialogDescription>Add to your list.</DialogDescription></DialogHeader>
                     <form onSubmit={handleAddItem} className="space-y-4">
                         <div className="grid grid-cols-4 gap-3"><div className="col-span-3"><Label>Item Name</Label><Input ref={inputRef} value={form.name} onChange={handleFormChange} name="name" className="h-12 text-lg" autoFocus autoComplete="off" /></div><div className="col-span-1"><Label>Qty</Label><Input type="number" value={form.quantity} onChange={handleFormChange} name="quantity" className="h-12 text-center" autoComplete="off" /></div></div>
                         <div className="grid grid-cols-2 gap-3"><div><Label>Price ({currencySymbol})</Label><Input type="number" value={form.price} onChange={handleFormChange} name="price" step="0.01" className="h-11" autoComplete="off" /></div>
@@ -516,7 +485,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
                             </div>
                         </div>
                         <div><Label>Notes</Label><Input value={form.notes} onChange={handleFormChange} name="notes" placeholder="Brand, Size, etc." className="h-11" autoComplete="off" /></div>
-                        <Button type="submit" className="w-full h-12 text-base bg-lime-600 hover:bg-lime-700 text-slate-900">Add to List</Button>
+                        <Button type="submit" className="w-full h-12 text-base bg-lime-600 hover:bg-lime-700 text-slate-900 font-bold">Add Item</Button>
                     </form>
                 </DialogContent>
             </Dialog>
@@ -535,7 +504,7 @@ export function ShoppingList({ user, list, currencySymbol }: { user: User, list:
             <AlertDialog isOpen={alertInfo.isOpen} onOpenChange={(o) => setAlertInfo({ ...alertInfo, isOpen: o })} title={alertInfo.title} description={alertInfo.desc} />
 
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete?" description={deleteConfirm?.type === 'completed' ? "Remove all completed items?" : "Irreversible."} onConfirm={handleDelete} />
-        </Card>
+        </div>
     )
 }
 
@@ -562,7 +531,7 @@ function EditShoppingItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
                     </div>
                 </div>
                 <div><Label>Notes</Label><Input value={form.notes} onChange={handleChange} name="notes" className="h-11" autoComplete="off" /></div>
-                <DialogFooter><Button type="submit" className="w-full h-11 bg-lime-600 hover:bg-lime-700 text-slate-900">Save Changes</Button></DialogFooter>
+                <DialogFooter><Button type="submit" className="w-full h-11 bg-lime-600 hover:bg-lime-700 text-slate-900 font-bold">Save Changes</Button></DialogFooter>
             </form>
         </DialogContent>
     )

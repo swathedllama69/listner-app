@@ -46,7 +46,7 @@ function PortalFAB({ onClick, className, icon: Icon, label }: any) {
     useEffect(() => setMounted(true), []);
     if (!mounted) return null;
     return createPortal(
-        <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-[100] flex items-center gap-3 animate-in zoom-in duration-300 pointer-events-none">
+        <div className="fixed bottom-24 right-4 md:bottom-10 md:right-10 z-[50] flex items-center gap-3 animate-in zoom-in duration-300 pointer-events-none">
             {label && <span className="bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg pointer-events-auto">{label}</span>}
             <Button onClick={onClick} className={`${className} shadow-2xl border-4 border-white/20 active:scale-90 transition-transform pointer-events-auto`}>
                 <Icon className="w-8 h-8" />
@@ -76,9 +76,11 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [items, setItems] = useState<WishlistItem[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [activeTab, setActiveTab] = useState("All")
-    const [page, setPage] = useState(1);
     const [usingCachedData, setUsingCachedData] = useState(false);
-    const ITEMS_PER_PAGE = 10;
+
+    // ⚡ FIX: Restored Pagination State
+    const [page, setPage] = useState(1);
+    const ITEMS_PER_PAGE = 20;
 
     const [isFormOpen, setIsFormOpen] = useState(false)
     const [isContributionOpen, setIsContributionOpen] = useState(false)
@@ -116,8 +118,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 setItems(cachedData);
                 setUsingCachedData(true);
                 setIsLoading(false);
-            } else if (isMounted) {
-                setIsLoading(true);
             }
 
             const { data, error } = await supabase.from("wishlist_items").select("*").eq("list_id", list.id).order("created_at", { ascending: false });
@@ -126,6 +126,8 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 setItems(data as WishlistItem[]);
                 saveToCache(cacheKey, data);
                 setUsingCachedData(false);
+                setIsLoading(false);
+            } else if (error && isMounted && !cachedData) {
                 setIsLoading(false);
             }
         };
@@ -138,15 +140,9 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 if (!item || !item.id) return;
 
                 setItems(prev => {
-                    if (payload.eventType === 'INSERT') {
-                        return [item as WishlistItem, ...prev.filter(i => i.id !== item.id)];
-                    }
-                    if (payload.eventType === 'UPDATE') {
-                        return prev.map(i => i.id === item.id ? item as WishlistItem : i);
-                    }
-                    if (payload.eventType === 'DELETE') {
-                        return prev.filter(i => i.id !== item.id);
-                    }
+                    if (payload.eventType === 'INSERT') return [item as WishlistItem, ...prev.filter(i => i.id !== item.id)];
+                    if (payload.eventType === 'UPDATE') return prev.map(i => i.id === item.id ? item as WishlistItem : i);
+                    if (payload.eventType === 'DELETE') return prev.filter(i => i.id !== item.id);
                     return prev;
                 });
             })
@@ -166,8 +162,10 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         });
     }, [items, activeTab]);
 
+    // ⚡ FIX: Restored Derived State for Pagination
     const visibleItems = activeItems.slice(0, page * ITEMS_PER_PAGE);
     const hasMore = activeItems.length > visibleItems.length;
+
     const completedItems = items.filter(i => i.is_complete);
     const totalTarget = activeItems.reduce((sum, i) => sum + (i.target_amount || 0), 0);
     const totalSaved = activeItems.reduce((sum, i) => sum + (i.saved_amount || 0), 0);
@@ -192,29 +190,14 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         const qty = parseInt(form.quantity);
 
         const newItemPayload = {
-            list_id: list.id,
-            user_id: user.id,
-            name: form.name,
-            description: form.description || null,
-            category: form.category,
-            target_amount: isNaN(target) ? null : target,
-            saved_amount: isNaN(saved) ? 0 : saved,
-            quantity: (form.category === "Item") ? qty : null,
-            link: form.link || null,
-            priority: form.priority
+            list_id: list.id, user_id: user.id, name: form.name, description: form.description || null,
+            category: form.category, target_amount: isNaN(target) ? null : target, saved_amount: isNaN(saved) ? 0 : saved,
+            quantity: (form.category === "Item") ? qty : null, link: form.link || null, priority: form.priority
         };
 
-        const tempItem: WishlistItem = {
-            id: -Date.now(),
-            created_at: new Date().toISOString(),
-            is_complete: false,
-            ...newItemPayload
-        } as any;
-
-        const newItems = [tempItem, ...items];
-        setItems(newItems);
-        saveToCache(CACHE_KEYS.WISHLIST(list.id), newItems);
-
+        const tempItem: WishlistItem = { id: -Date.now(), created_at: new Date().toISOString(), is_complete: false, ...newItemPayload } as any;
+        setItems([tempItem, ...items]);
+        saveToCache(CACHE_KEYS.WISHLIST(list.id), [tempItem, ...items]);
         SyncQueue.add({ type: 'ADD_WISHLIST_ITEM', payload: tempItem, householdId: list.household_id });
 
         setIsFormOpen(false);
@@ -235,30 +218,21 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         e.preventDefault();
         const amount = parseFloat(contribForm.amount);
         if (!selectedItemForContrib || isNaN(amount)) return;
-
         triggerHaptic(ImpactStyle.Light);
         const newSaved = (selectedItemForContrib.saved_amount || 0) + amount;
-
         setItems(items.map(i => i.id === selectedItemForContrib.id ? { ...i, saved_amount: newSaved } : i));
         setIsContributionOpen(false);
         setContribForm({ amount: "", note: "" });
-
-        const { error } = await supabase.from('wishlist_items').update({ saved_amount: newSaved }).eq('id', selectedItemForContrib.id);
-        if (error) toast.error("Failed to add funds.");
-        else {
-            triggerNotificationHaptic(NotificationType.Success);
-            toast.success("Funds added!");
-        }
+        await supabase.from('wishlist_items').update({ saved_amount: newSaved }).eq('id', selectedItemForContrib.id);
+        triggerNotificationHaptic(NotificationType.Success);
+        toast.success("Funds added!");
     }
 
     const handleUpdateItem = async (updatedItem: Partial<WishlistItem>) => {
         if (!editingItem) return;
         setItems(items.map(i => i.id === editingItem.id ? { ...i, ...updatedItem } as WishlistItem : i));
         setEditingItem(null);
-        await supabase.from('wishlist_items').update({
-            name: updatedItem.name, description: updatedItem.description, category: updatedItem.category, target_amount: updatedItem.target_amount,
-            saved_amount: updatedItem.saved_amount, quantity: updatedItem.quantity, link: updatedItem.link, priority: updatedItem.priority
-        }).eq('id', editingItem.id);
+        await supabase.from('wishlist_items').update(updatedItem).eq('id', editingItem.id);
         toast.success("Updated!");
     };
 
@@ -289,32 +263,23 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         await supabase.from("wishlist_items").update({ is_complete: newStatus }).eq("id", item.id)
     }
 
-    // ⚡ FIX: Removed z-20 to avoid unclickable areas when overlaid by fixed elements
     return (
-        <div className={`space-y-6 pb-32 relative`}>
-            <div className="z-10 bg-slate-900 text-white px-6 py-5 shadow-md flex items-center justify-between rounded-t-none md:rounded-t-2xl overflow-hidden mt-1">
+        <div className="flex flex-col h-full max-w-4xl mx-auto w-full relative">
+            {/* Header */}
+            <div className="z-10 bg-slate-900 text-white px-5 py-4 shadow-md rounded-b-xl md:rounded-2xl relative overflow-hidden mb-4">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-
-                <div className="relative z-10">
-                    <div className="flex items-center gap-2 mb-1">
-                        <h2 className="text-xl font-bold truncate max-w-[200px]">{listSettings.name}</h2>
-                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>
-                            {listSettings.isPrivate ? 'Private' : 'Shared'}
-                        </span>
-                        {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
+                <div className="relative z-10 flex justify-between items-start">
+                    <div>
+                        <div className="flex items-center gap-2 mb-1">
+                            <h2 className="text-xl font-bold truncate max-w-[200px]">{listSettings.name}</h2>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${listSettings.isPrivate ? 'bg-rose-500 text-white' : 'bg-lime-500 text-slate-900'}`}>{listSettings.isPrivate ? 'Private' : 'Shared'}</span>
+                            {usingCachedData && <CloudOff className="w-4 h-4 text-slate-400" />}
+                        </div>
+                        <p className="text-xs text-slate-400 font-medium flex items-center gap-2"><Target className="w-3 h-3" /> {items.length} goals <span className="w-1 h-1 bg-slate-500 rounded-full"></span> {currencySymbol}{totalSaved.toLocaleString()} Saved</p>
                     </div>
-                    <p className="text-xs text-slate-400 font-medium flex items-center gap-2">
-                        <Target className="w-3 h-3" /> {items.length} goals
-                        <span className="w-1 h-1 bg-slate-500 rounded-full"></span>
-                        {currencySymbol}{totalSaved.toLocaleString()} Saved
-                    </p>
-                </div>
-                <div className="relative z-10 text-right">
-                    <div className="flex gap-2 justify-end">
+                    <div>
                         <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-white hover:bg-slate-800"><Settings className="w-5 h-5" /></Button>
-                            </DropdownMenuTrigger>
+                            <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 text-slate-300 hover:text-white hover:bg-slate-800"><Settings className="w-5 h-5" /></Button></DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
                                 <DropdownMenuLabel>List Options</DropdownMenuLabel>
                                 <DropdownMenuSeparator />
@@ -326,15 +291,12 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                         </DropdownMenu>
                     </div>
                 </div>
+                <Progress value={totalProgress} className="h-1 bg-slate-800 rounded-none mt-3" indicatorClassName="bg-lime-500" />
             </div>
 
-            <div className="bg-slate-900 pb-1 -mt-6">
-                <Progress value={totalProgress} className="h-1.5 bg-slate-800 rounded-none" indicatorClassName="bg-lime-500" />
-            </div>
-
-            <div className="px-4">
+            <div className="px-2">
                 <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setPage(1); }}>
-                    <TabsList className="grid w-full grid-cols-5 mb-4 bg-slate-100 p-1">
+                    <TabsList className="grid w-full grid-cols-5 mb-4 bg-slate-100 p-1 rounded-xl">
                         {[
                             { label: "All", icon: Gem },
                             { label: "Item", icon: Target },
@@ -342,77 +304,70 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                             { label: "Vacation", icon: Plane },
                             { label: "Other", icon: MoreHorizontal }
                         ].map(({ label, icon: Icon }) => (
-                            <TabsTrigger key={label} value={label} className="text-[10px] flex flex-col gap-1 items-center data-[state=active]:text-slate-900 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+                            <TabsTrigger key={label} value={label} className="text-[10px] flex flex-col gap-1 items-center data-[state=active]:text-slate-900 data-[state=active]:bg-white data-[state=active]:shadow-sm rounded-lg">
                                 <Icon className="w-3 h-3" /> {label}
                             </TabsTrigger>
                         ))}
                     </TabsList>
 
-                    <TabsContent value={activeTab} className="space-y-3">
-                        {isLoading && items.length === 0 ? (
-                            <p className="text-center py-12 text-slate-400">Loading...</p>
-                        ) : visibleItems.length === 0 ? (
-                            <div className="text-center py-12 text-slate-400 flex flex-col items-center"><Goal className="w-12 h-12 opacity-20 mb-2" /> No active goals here.</div>
-                        ) : (
-                            visibleItems.map(item => {
-                                const progress = getProgress(item.saved_amount, item.target_amount);
-                                const isExpanded = expandedId === item.id;
-                                const isHigh = item.priority === 'High';
+                    <TabsContent value={activeTab} className="space-y-3 pb-32">
+                        {isLoading && items.length === 0 ? <p className="text-center py-12 text-slate-400">Loading...</p> : visibleItems.length === 0 ? <div className="text-center py-12 text-slate-400 flex flex-col items-center"><Goal className="w-12 h-12 opacity-20 mb-2" /> No active goals.</div> : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {/* ⚡ FIX: Mapped using standard array map instead of virtual scroll */}
+                                {visibleItems.map(item => {
+                                    const progress = getProgress(item.saved_amount, item.target_amount);
+                                    const isExpanded = expandedId === item.id;
+                                    const isHigh = item.priority === 'High';
 
-                                return (
-                                    <div key={item.id} className={`border rounded-xl transition-all duration-200 overflow-hidden ${getPriorityCardStyle(item.priority || 'Medium')} ${isExpanded ? 'shadow-md ring-1 ring-lime-200' : 'shadow-sm'}`}>
-                                        <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : item.id)}>
-                                            <Checkbox checked={item.is_complete} onCheckedChange={() => toggleComplete(item)} onClick={(e) => e.stopPropagation()} className="mt-0.5 rounded-full data-[state=checked]:bg-emerald-500 border-slate-400" />
-                                            <div className="flex-1 min-w-0">
-                                                <div className="flex justify-between items-center mb-1">
-                                                    <h3 className={`font-bold text-sm truncate ${isHigh ? 'text-rose-800' : 'text-slate-800'}`}>{item.name}</h3>
-                                                    <span className="text-xs font-bold text-slate-600">{Math.round(progress)}%</span>
+                                    return (
+                                        <div key={item.id} className={`border rounded-xl transition-all duration-200 overflow-hidden bg-white shadow-sm ${getPriorityCardStyle(item.priority || 'Medium')} ${isExpanded ? 'ring-1 ring-lime-200' : ''}`}>
+                                            <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : item.id)}>
+                                                <Checkbox checked={item.is_complete} onCheckedChange={() => toggleComplete(item)} onClick={(e) => e.stopPropagation()} className="mt-0.5 rounded-full data-[state=checked]:bg-emerald-500 border-slate-400" />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between items-center mb-1">
+                                                        <h3 className={`font-bold text-sm truncate ${isHigh ? 'text-rose-800' : 'text-slate-800'}`}>{item.name}</h3>
+                                                        <span className="text-xs font-bold text-slate-600">{Math.round(progress)}%</span>
+                                                    </div>
+                                                    <Progress value={progress} className="h-1.5 bg-slate-100" indicatorClassName={getProgressColor(progress)} />
                                                 </div>
-                                                <Progress value={progress} className="h-1.5 bg-slate-100" indicatorClassName={getProgressColor(progress)} />
+                                                <div className="text-slate-400">{isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
                                             </div>
-                                            <div className="text-slate-400">{isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
+                                            {isExpanded && (
+                                                <div className="px-4 pb-4 pt-0 bg-slate-50/50 border-t border-slate-100 animate-in slide-in-from-top-1">
+                                                    <div className="flex justify-between text-xs text-slate-500 mt-3 mb-3 font-medium">
+                                                        <span>Saved: {currencySymbol}{item.saved_amount?.toLocaleString()}</span>
+                                                        <span>Target: {currencySymbol}{item.target_amount?.toLocaleString()}</span>
+                                                    </div>
+                                                    {item.description && <p className="text-xs text-slate-600 italic mb-3 bg-white p-2 rounded border border-slate-100">{item.description}</p>}
+                                                    <div className="flex gap-2 mt-2">
+                                                        <Button size="sm" variant="outline" className="flex-1 h-9 text-xs bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 font-semibold" onClick={() => { setSelectedItemForContrib(item); setIsContributionOpen(true) }}><Plus className="w-3 h-3 mr-1" /> Add Savings</Button>
+                                                        {item.link && <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => window.open(item.link!, '_blank')}><LinkIcon className="w-4 h-4 text-blue-500" /></Button>}
+                                                        {item.user_id === user.id && (
+                                                            <DropdownMenu>
+                                                                <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" className="h-9 w-9 p-0 hover:bg-slate-100"><MoreHorizontal className="w-4 h-4 text-slate-500" /></Button></DropdownMenuTrigger>
+                                                                <DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Details</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem></DropdownMenuContent>
+                                                            </DropdownMenu>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
                                         </div>
-                                        {isExpanded && (
-                                            <div className="px-4 pb-4 pt-0 bg-slate-50/50 border-t border-slate-100 animate-in slide-in-from-top-1">
-                                                <div className="flex justify-between text-xs text-slate-500 mt-3 mb-3 font-medium">
-                                                    <span>Saved: {currencySymbol}{item.saved_amount?.toLocaleString()}</span>
-                                                    <span>Target: {currencySymbol}{item.target_amount?.toLocaleString()}</span>
-                                                </div>
-                                                {item.description && <p className="text-xs text-slate-600 italic mb-3 bg-white p-2 rounded border border-slate-100">{item.description}</p>}
-                                                <div className="flex gap-2 mt-2">
-                                                    <Button
-                                                        size="sm"
-                                                        variant="outline"
-                                                        className="flex-1 h-9 text-xs bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 font-semibold"
-                                                        onClick={() => { setSelectedItemForContrib(item); setIsContributionOpen(true) }}
-                                                    >
-                                                        <Plus className="w-3 h-3 mr-1" /> Add Savings
-                                                    </Button>
-                                                    {item.link && <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => window.open(item.link!, '_blank')}><LinkIcon className="w-4 h-4 text-blue-500" /></Button>}
-                                                    {item.user_id === user.id && (
-                                                        <DropdownMenu>
-                                                            <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" className="h-9 w-9 p-0 hover:bg-slate-100"><MoreHorizontal className="w-4 h-4 text-slate-500" /></Button></DropdownMenuTrigger>
-                                                            <DropdownMenuContent align="end">
-                                                                <DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Details</DropdownMenuItem>
-                                                                <DropdownMenuSeparator />
-                                                                <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
-                                                            </DropdownMenuContent>
-                                                        </DropdownMenu>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )}
-                                    </div>
-                                )
-                            })
+                                    )
+                                })}
+                            </div>
                         )}
-                        {hasMore && <Button variant="ghost" className="w-full text-xs text-slate-400" onClick={() => setPage(p => p + 1)}>Load More</Button>}
+                        {/* ⚡ FIX: Added Load More Button */}
+                        {hasMore && (
+                            <Button variant="ghost" className="w-full text-xs text-slate-400 py-4" onClick={() => setPage(p => p + 1)}>
+                                Load More Goals
+                            </Button>
+                        )}
                     </TabsContent>
                 </Tabs>
             </div>
 
             {completedItems.length > 0 && (
-                <Accordion type="single" collapsible className="bg-slate-50 rounded-xl border border-slate-100 px-4 mt-4 mx-4">
+                <Accordion type="single" collapsible className="bg-slate-50 rounded-xl border border-slate-100 px-4 mt-4 mx-4 mb-24">
                     <AccordionItem value="completed" className="border-none">
                         <AccordionTrigger className="text-slate-400 hover:text-slate-600 py-2 text-sm">Completed Goals ({completedItems.length})</AccordionTrigger>
                         <AccordionContent>
@@ -430,6 +385,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </Accordion>
             )}
 
+            {/* LIME FAB */}
             <PortalFAB onClick={() => setIsFormOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} label="New Goal" />
 
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>

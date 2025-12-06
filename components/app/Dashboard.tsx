@@ -326,6 +326,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     if (selectedList) {
         return (
+            // ⚡ FIX: Added overflow-y-auto to allow scrolling list content
             <div className="fixed inset-0 z-[100] bg-slate-50 animate-in slide-in-from-right-10 duration-300 overflow-y-auto pointer-events-auto">
                 <div className="w-full min-h-full p-4 pt-14 pb-32">
                     {/* Back button needs explicit pointer-events to be clickable inside the overall auto-capture */}
