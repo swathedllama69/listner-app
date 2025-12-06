@@ -50,7 +50,6 @@ const getCategoryIcon = (category: string) => {
     return <div className={`h-8 w-8 rounded-full flex items-center justify-center ${config.bg} ${config.color}`}><Icon className="w-4 h-4" /></div>;
 }
 
-// ⚡ UPDATED EXPORT LOGIC
 const exportData = async (content: string, filename: string) => {
     if (Capacitor.isNativePlatform()) {
         try {
@@ -103,17 +102,11 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
     useEffect(() => {
         async function fetchFinanceData() {
             setIsLoading(true);
-
-            // ⚡ BULLET-PROOF API FIX: Split query to avoid foreign key errors
             try {
-                // 1. Get Members
                 const { data: memberIds } = await supabase.from('household_members').select('user_id').eq('household_id', household.id);
-
                 if (memberIds && memberIds.length > 0) {
                     const ids = memberIds.map(m => m.user_id);
-                    // 2. Get Profiles
                     const { data: profiles } = await supabase.from('profiles').select('id, email').in('id', ids);
-
                     if (profiles) {
                         const mappedMembers = profiles.map(p => ({
                             user_id: p.id,
@@ -194,8 +187,8 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
         <TooltipProvider>
             <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
                 <div className="px-4 pt-2 pb-4">
-                    {/* ⚡ FIX H1: Changed rounded-2xl to rounded-xl */}
-                    <div className={`rounded-xl px-6 py-3 flex items-center justify-between shadow-md ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
+                    {/* ⚡ FIX H1: Changed rounded-2xl to rounded-md */}
+                    <div className={`rounded-md px-6 py-3 flex items-center justify-between shadow-md ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
                         <div className="flex flex-col">
                             <span className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest">Net Position</span>
                             {!isZero && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}

@@ -1,31 +1,18 @@
 "use client"
 
-import { useState, useRef } from "react"
+import { useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Capacitor } from "@capacitor/core"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Card } from "@/components/ui/card"
 import {
-    Loader2, Home, Users, ArrowRight, Camera, User as UserIcon,
-    CheckCircle2, ChevronLeft, Plus, Sparkles, QrCode, MapPin
+    Loader2, Home, Users, ArrowRight,
+    ChevronLeft, Plus, Sparkles, QrCode
 } from "lucide-react"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { compressImage } from "@/lib/utils"
 
-const COUNTRIES = ["Nigeria", "United States", "United Kingdom", "Canada", "Ghana", "South Africa", "Kenya"];
-const CURRENCIES = [
-    { code: "NGN", symbol: "₦", name: "Nigerian Naira" },
-    { code: "USD", symbol: "$", name: "US Dollar" },
-    { code: "GBP", symbol: "£", name: "British Pound" },
-    { code: "EUR", symbol: "€", name: "Euro" },
-    { code: "CAD", symbol: "C$", name: "Canadian Dollar" }
-];
-
-// Mock Scanner for Web/Testing
 const BarcodeScanner = {
     checkPermissions: async () => ({ camera: 'granted' }),
     requestPermissions: async () => ({ camera: 'granted' }),
@@ -33,36 +20,14 @@ const BarcodeScanner = {
 };
 const BarcodeFormat = { QrCode: 'QR_CODE' };
 
-// --- ANIMATION CONFIG ---
-const animationItems = [
-    { type: '🍎', size: 10, duration: 18, delay: 0, top: '10%', left: '10%', animKey: 'slowDrift1', isEmoji: true, opacity: 0.25 },
-    { type: '🛒', size: 11, duration: 15, delay: 15, top: '20%', right: '30%', animKey: 'slowDrift4', isEmoji: true, opacity: 0.2 },
-    { type: '🥦', size: 12, duration: 23, delay: 5, top: '50%', right: '5%', animKey: 'slowDrift2', isEmoji: true, opacity: 0.15 },
-    { type: '🍌', size: 15, duration: 17, delay: 50, bottom: '20%', right: '50%', animKey: 'slowDrift11', isEmoji: true, opacity: 0.2 },
-    { type: '🪑', size: 10, duration: 16, delay: 60, top: '60%', left: '5%', animKey: 'slowDrift13', isEmoji: true, opacity: 0.2 },
-    { type: '🖊️', size: 9, duration: 20, delay: 65, bottom: '40%', left: '15%', animKey: 'slowDrift14', isEmoji: true, opacity: 0.25 },
-    { Icon: QrCode, color: 'text-lime-400', size: 10, duration: 20, delay: 20, bottom: '25%', right: '15%', animKey: 'slowDrift5', isEmoji: false, opacity: 0.2 },
-    { Icon: Home, color: 'text-teal-400', size: 12, duration: 18, delay: 25, top: '70%', left: '20%', animKey: 'slowDrift6', isEmoji: false, opacity: 0.25 },
-];
-
 export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, onHouseholdCreated: (user: User) => void }) {
-    const [view, setView] = useState<'choice' | 'create_input' | 'join_input' | 'profile_setup' | 'currency_setup'>('choice');
-    const [currentHouseholdId, setCurrentHouseholdId] = useState<string | null>(null);
+    // ⚡ FIX: Removed 'profile_setup' and 'currency_setup'. Only create or join.
+    const [view, setView] = useState<'choice' | 'create_input' | 'join_input'>('choice');
 
     const [loading, setLoading] = useState(false)
     const [name, setName] = useState("")
     const [inviteCode, setInviteCode] = useState("")
     const [error, setError] = useState<string | null>(null)
-
-    // Profile Setup State
-    const [displayName, setDisplayName] = useState(user.user_metadata?.full_name || "");
-    const [avatarUrl, setAvatarUrl] = useState(user.user_metadata?.avatar_url || "");
-    const [uploading, setUploading] = useState(false);
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
-    // Currency/Location State
-    const [country, setCountry] = useState("Nigeria");
-    const [currency, setCurrency] = useState("NGN");
 
     // --- STEP 1: HOUSEHOLD/JOIN LOGIC ---
     const handleHouseholdSubmit = async (overrideCode?: string) => {
@@ -73,8 +38,9 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
             if (view === 'create_input') {
                 const { data: hh, error: hhError } = await supabase.from('households').insert({
                     name: name,
-                    currency: currency,
-                    country: country,
+                    // Default values, will be updated in OnboardingWizard later
+                    currency: 'NGN',
+                    country: 'Nigeria',
                 }).select().single();
                 if (hhError) throw hhError;
 
@@ -86,16 +52,10 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 });
                 if (memError) throw memError;
 
-                setCurrentHouseholdId(hh.id);
-                setView('profile_setup');
-
             } else {
                 if (!codeToUse) throw new Error("Missing invite code");
-                const { data: hh, error: fetchError } = await supabase.from('households').select('id, country, currency').eq('invite_code', codeToUse.trim().toUpperCase()).single();
+                const { data: hh, error: fetchError } = await supabase.from('households').select('id').eq('invite_code', codeToUse.trim().toUpperCase()).single();
                 if (fetchError || !hh) throw new Error("Invalid invite code");
-
-                setCountry(hh.country || 'Nigeria');
-                setCurrency(hh.currency || 'NGN');
 
                 const { data: existing } = await supabase.from('household_members').select('id').eq('user_id', user.id).eq('household_id', hh.id).maybeSingle();
                 if (!existing) {
@@ -107,89 +67,21 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     });
                     if (joinError) throw joinError;
                 }
-                setCurrentHouseholdId(hh.id);
-                setView('profile_setup');
             }
+
+            // ⚡ FIX: Immediately finish. The 'OnboardingWizard' in Dashboard will handle name/photo/currency.
+            onHouseholdCreated(user);
+
         } catch (err: any) {
             console.error(err);
             setError(err.message || "Something went wrong.");
         } finally { setLoading(false); }
     };
 
-    // --- STEP 2: PROFILE LOGIC ---
-    const handleProfileContinue = async () => {
-        if (!displayName.trim()) return;
-        setView('currency_setup');
-    }
-
-    // --- STEP 3: FINAL SUBMISSION ---
-    const handleFinalSubmit = async () => {
-        setLoading(true);
-        if (!currentHouseholdId) {
-            setError("Error: Missing household ID. Please restart.");
-            setLoading(false);
-            return;
-        }
-
-        try {
-            // 1. CRITICAL FIX: Capture the UPDATED user object from Supabase
-            // This object contains the new metadata (name, avatar, onboarding_complete)
-            const { data: authData, error: authError } = await supabase.auth.updateUser({
-                data: { full_name: displayName, avatar_url: avatarUrl, onboarding_complete: true }
-            });
-
-            if (authError) throw authError;
-
-            // If authData.user is null for some reason, fallback to current 'user', but this shouldn't happen on success.
-            const updatedUser = authData.user || user;
-
-            // 2. Update Profiles Table
-            const { data: profileData, error: profileError } = await supabase.from('profiles').update({
-                full_name: displayName, avatar_url: avatarUrl, has_seen_tutorial: false
-            }).eq('id', user.id).select();
-
-            if (profileError || !profileData || profileData.length === 0) {
-                await supabase.from('profiles').insert({ id: user.id, full_name: displayName, avatar_url: avatarUrl, email: user.email, username: user.email?.split('@')[0], has_seen_tutorial: false });
-            }
-
-            // 3. Update Household
-            await supabase.from('households').update({ country, currency }).eq('id', currentHouseholdId);
-
-            // 4. Pass the FRESH updatedUser back to parent
-            await new Promise(resolve => setTimeout(resolve, 500));
-
-            // ✅ THIS IS THE FIX: Passing 'updatedUser' instead of 'user'
-            onHouseholdCreated(updatedUser as User);
-
-        } catch (e: any) {
-            console.error(e);
-            setError("Setup Failed: " + e.message);
-        } finally { setLoading(false); }
-    };
-
-    const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0]; if (!file) return;
-        setUploading(true);
-        try {
-            const compressed = await compressImage(file);
-            const path = `${user.id}/avatar-${Date.now()}.jpg`;
-            const { error: uploadError } = await supabase.storage.from('images').upload(path, compressed);
-            if (uploadError) throw uploadError;
-            const { data } = supabase.storage.from('images').getPublicUrl(path);
-            setAvatarUrl(data.publicUrl);
-        } catch (e: any) { alert("Upload failed: " + e.message); }
-        finally { setUploading(false); }
-    };
-
-    const handleCountryChange = (c: string) => {
-        setCountry(c);
-        const match = CURRENCIES.find(curr => c.toUpperCase().includes(curr.name.toUpperCase().split(' ')[1] || 'XYZ'));
-        if (match) setCurrency(match.code);
-    }
-
     const handleScan = async () => {
         if (!Capacitor.isNativePlatform()) {
-            alert("QR Code scanner is only available on the native app.");
+            // ⚡ FIX: Removed Mock Code auto-fill. Now alerts user.
+            alert("QR Code scanner is only available on the mobile app.");
             return;
         }
         try {
@@ -209,35 +101,9 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         }
     };
 
-    const AnimatedBackground = () => (
-        <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-            <style jsx global>{`
-                @keyframes slowDrift1 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 33% { transform: translate(30px, 60px) rotate(10deg); } 66% { transform: translate(-45px, 15px) rotate(-5deg); } }
-                @keyframes slowDrift2 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(-30px, -30px) rotate(-10deg); } 80% { transform: translate(30px, 45px) rotate(5deg); } }
-                @keyframes slowDrift4 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(-60px, 30px) rotate(20deg); } }
-                @keyframes slowDrift5 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 60% { transform: translate(15px, -60px) rotate(-10deg); } }
-                @keyframes slowDrift6 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 30% { transform: translate(-45px, -15px) rotate(5deg); } }
-                @keyframes slowDrift11 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 40% { transform: translate(45px, 45px) rotate(-10deg); } 80% { transform: translate(-15px, -30px) rotate(5deg); } }
-                @keyframes slowDrift13 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 50% { transform: translate(-15px, 45px) rotate(-5deg); } }
-                @keyframes slowDrift14 { 0%, 100% { transform: translate(0, 0) rotate(0deg); } 65% { transform: translate(30px, -30px) rotate(10deg); } }
-            `}</style>
-            <div className="absolute inset-0 bg-gradient-to-br from-teal-50/50 via-white to-lime-50/50 opacity-80"></div>
-            {animationItems.map((item, index) => {
-                const sizeInPixels = item.size * (item.isEmoji ? 4 : 3);
-                const IconComponent = item.Icon;
-                return (
-                    <div key={index} className={`absolute pointer-events-none ${item.color || ''}`} style={{ ...item, width: `${sizeInPixels}px`, height: `${sizeInPixels}px`, animation: `${item.animKey} ${item.duration}s ease-in-out ${item.delay}s infinite alternate`, opacity: item.opacity }}>
-                        {item.isEmoji ? <span className="text-4xl drop-shadow-sm" style={{ fontSize: `${sizeInPixels}px` }}>{item.type}</span> : IconComponent && <IconComponent className="w-full h-full" />}
-                    </div>
-                );
-            })}
-        </div>
-    );
-
     if (view === 'choice') {
         return (
             <div className="relative flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 overflow-hidden">
-                <AnimatedBackground />
                 <div className="relative z-10 w-full max-w-sm flex flex-col gap-6 animate-in zoom-in-95 duration-500">
                     <div className="text-center space-y-4 mb-2">
                         <div className="w-20 h-20 bg-white rounded-[2rem] shadow-xl shadow-lime-100 flex items-center justify-center mx-auto mb-6">
@@ -265,7 +131,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         const isCreate = view === 'create_input';
         return (
             <div className="relative flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 overflow-hidden">
-                <AnimatedBackground />
                 <Card className="relative z-10 w-full max-w-sm border-none shadow-2xl bg-white/95 backdrop-blur rounded-[2rem] p-8 overflow-hidden animate-in slide-in-from-right-8 duration-300">
                     <button onClick={() => { setView('choice'); setError(null); }} className="absolute top-6 left-6 text-slate-400 hover:text-slate-600 p-2 -ml-2 rounded-full hover:bg-slate-50 transition-colors"><ChevronLeft className="w-6 h-6" /></button>
                     <div className="mt-8 text-center space-y-6">
@@ -284,39 +149,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 </Card>
             </div>
         )
-    }
-
-    if (view === 'profile_setup') {
-        return (
-            <div className="relative flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 overflow-hidden">
-                <AnimatedBackground />
-                <Card className="relative z-10 w-full max-w-sm border-none shadow-2xl bg-white/95 backdrop-blur rounded-[2rem] p-8 space-y-8 animate-in zoom-in-95 duration-500">
-                    <div className="text-center mt-8"><h1 className="text-2xl font-bold text-slate-900">One last thing</h1><p className="text-slate-500 mt-2 text-sm font-medium">Add a photo so others know it's you.</p></div>
-                    <div className="flex justify-center"><div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}><div className="h-32 w-32 rounded-full bg-slate-50 border-4 border-white shadow-xl overflow-hidden flex items-center justify-center transition-all group-hover:scale-105">{avatarUrl ? <img src={avatarUrl} alt="Avatar" className="w-full h-full object-cover" /> : <UserIcon className="w-12 h-12 text-slate-300" />}{uploading && <div className="absolute inset-0 bg-black/40 flex items-center justify-center backdrop-blur-sm"><Loader2 className="w-8 h-8 text-white animate-spin" /></div>}</div><div className="absolute bottom-1 right-1 bg-slate-900 text-white p-2.5 rounded-full border-4 border-white shadow-lg group-hover:bg-lime-600 transition-colors"><Camera className="w-5 h-5" /></div></div><input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} /></div>
-                    <div className="space-y-4"><div className="space-y-2 text-center"><Label className="text-xs font-bold text-slate-400 uppercase tracking-widest">Display Name</Label><Input placeholder="e.g. John" value={displayName} onChange={e => setDisplayName(e.target.value)} className="h-14 bg-slate-50 border-slate-200 text-center text-lg font-bold rounded-2xl focus:bg-white transition-all" /></div><Button onClick={handleProfileContinue} disabled={loading || uploading || !displayName.trim()} className="w-full h-14 bg-slate-900 hover:bg-slate-800 text-white text-lg font-bold rounded-2xl shadow-xl shadow-slate-200 transition-all active:scale-95">Continue <ArrowRight className="w-5 h-5 ml-2" /></Button></div>
-                </Card>
-            </div>
-        );
-    }
-
-    if (view === 'currency_setup') {
-        return (
-            <div className="relative flex flex-col items-center justify-center min-h-screen p-6 bg-slate-50 overflow-hidden">
-                <AnimatedBackground />
-                <Card className="relative z-10 w-full max-w-sm border-none shadow-2xl bg-white/95 backdrop-blur rounded-[2rem] p-8 space-y-6 animate-in slide-in-from-right-8 duration-300">
-                    <button onClick={() => setView('profile_setup')} className="absolute top-6 left-6 text-slate-400 hover:text-slate-600 p-2 -ml-2 rounded-full hover:bg-slate-50 transition-colors"><ChevronLeft className="w-6 h-6" /></button>
-                    <div className="text-center mt-8"><h1 className="text-2xl font-bold text-slate-900">Final Details</h1><p className="text-sm text-slate-500 mt-2 font-medium">Set your household's currency and region.</p></div>
-                    <div className="space-y-4">
-                        <div className="space-y-2"><Label className="ml-1 text-slate-500 font-bold text-[10px] uppercase tracking-wider">Country</Label><div className="relative"><MapPin className="absolute left-4 top-4 w-5 h-5 text-slate-400 z-10" /><Select value={country} onValueChange={handleCountryChange}><SelectTrigger className="pl-12 h-14 bg-slate-50 border-slate-200 rounded-2xl font-medium text-slate-700"><SelectValue /></SelectTrigger><SelectContent className="max-h-[200px]">{COUNTRIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select></div></div>
-                        <div className="space-y-2"><Label className="ml-1 text-slate-500 font-bold text-[10px] uppercase tracking-wider">Currency</Label><Select value={currency} onValueChange={setCurrency}><SelectTrigger className="h-14 bg-slate-50 border-slate-200 rounded-2xl font-medium text-slate-700 px-4"><SelectValue /></SelectTrigger><SelectContent className="max-h-[200px]">{CURRENCIES.map(c => <SelectItem key={c.code} value={c.code}>{c.code} ({c.symbol}) - {c.name}</SelectItem>)}</SelectContent></Select></div>
-                    </div>
-                    <div className="flex gap-3 pt-2">
-                        <Button variant="ghost" onClick={() => setView('profile_setup')} className="h-14 w-20 rounded-2xl text-slate-400 hover:text-slate-600 hover:bg-slate-50 font-bold">Back</Button>
-                        <Button onClick={handleFinalSubmit} disabled={loading} className="flex-1 h-14 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl shadow-xl shadow-emerald-200 font-bold text-base transition-all active:scale-95">{loading ? "Finishing..." : "All Done"} {loading ? <Loader2 className="w-5 h-5 ml-2 animate-spin" /> : <CheckCircle2 className="w-5 h-5 ml-2 opacity-60" />}</Button>
-                    </div>
-                </Card>
-            </div>
-        );
     }
 
     return null;

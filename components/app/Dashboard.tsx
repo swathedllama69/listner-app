@@ -251,7 +251,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     const fetchLists = async () => {
         setIsLoading(true)
         try {
-            // Parallel Fetching for speed
             const [listsResult, summariesResult] = await Promise.all([
                 supabase.from("lists").select("*").eq("household_id", household.id).eq("list_type", listType).order("created_at", { ascending: true }),
                 supabase.rpc(listType === 'shopping' ? 'get_shopping_list_summaries' : 'get_wishlist_summaries', { target_household_id: household.id })
@@ -286,7 +285,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     useEffect(() => { fetchLists() }, [household.id, listType, refreshTrigger]);
 
-    // ⚡ DELAYED Explainer REMOVED based on your request
+    // ⚡ EXPLAINER POPUP REMOVED: Auto-trigger deleted.
 
     const handleUpdateList = (updated: List) => setLists(lists.map(l => l.id === updated.id ? { ...l, ...updated } : l));
     const handleDeleteList = async () => {
@@ -326,9 +325,9 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     if (selectedList) {
         return (
-            // ⚡ FIX: Added z-index [50] to ensuring clickability above Dashboard
+            // ⚡ FIX: z-50 for detail view clickability
             <div className="w-full animate-in slide-in-from-right-4 fade-in duration-300 relative z-[50]">
-                {/* ⚡ FIX G1: Updated button style to neutral & pointer-events */}
+                {/* ⚡ FIX: Neutral back button */}
                 <Button
                     variant="ghost"
                     onClick={handleBack}
@@ -360,7 +359,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     return (
         <div className="space-y-6">
 
-            {/* ⚡ FIXED: Moved Explainer Button to Flex Container */}
             {lists.length > 0 && (
                 <div className="flex justify-end mb-2">
                     <Button variant="ghost" size="sm" onClick={() => setShowExplainer(true)} className="text-slate-400 hover:text-slate-600 h-6 px-2 text-[10px] uppercase font-bold gap-1 bg-slate-50 border border-slate-100 rounded-lg">
@@ -369,7 +367,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                 </div>
             )}
 
-            {/* ⚡ OPTION C: Skeletons for Loading */}
             {isLoading ? (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     {[1, 2, 3, 4].map(i => (
@@ -407,7 +404,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                         <>
                             {listType === 'shopping' ? (
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                    {/* ⚡ FIX G2: Reworked Shopping Summary Card */}
                                     <Card className="rounded-2xl shadow-sm border border-slate-100 p-4 bg-white/70 hover:bg-white">
                                         <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Items Remaining</CardTitle>
                                         <div className="text-2xl font-bold text-slate-800">{grandTotalItems.toLocaleString()}</div>
@@ -419,7 +415,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                                    {/* ⚡ UPDATED: Wishlist Summary now uses Lime Theme to match lists */}
                                     <Card className="rounded-2xl shadow-sm border border-lime-100 p-4 bg-lime-50/50 hover:bg-lime-100/50">
                                         <CardHeader className="p-0 pb-1"><CardTitle className="text-[10px] font-bold text-lime-700 uppercase tracking-wider flex items-center gap-1"><Goal className="w-3 h-3" /> All Goals</CardTitle></CardHeader>
                                         <CardContent className="p-0">
@@ -454,8 +449,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                                 {getListIcon(list)}
                                             </div>
                                             <h3 className="font-bold text-slate-800 text-lg mb-0 truncate flex-1">{list.name}</h3>
-
-                                            {/* ⚡ RED PADLOCK */}
                                             {list.is_private && <Lock className="w-5 h-5 text-red-500 fill-red-50 stroke-[2.5]" />}
                                         </div>
 
@@ -489,13 +482,12 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
             <ConfirmDialog isOpen={!!deleteConfirm} onOpenChange={(o) => !o && setDeleteConfirm(null)} title="Delete List?" description="This action cannot be undone." onConfirm={handleDeleteList} />
 
-            {/* ⚡ EXPLAINER DIALOG (User can trigger manually) */}
             <Dialog open={showExplainer} onOpenChange={setShowExplainer}>
                 <DialogContent className="sm:max-w-sm rounded-2xl text-center">
                     <DialogHeader className="flex flex-col items-center">
                         <div className="bg-slate-50 p-4 rounded-full mb-4">{explainerContent.icon}</div>
                         <DialogTitle className="text-xl font-bold text-slate-800">{explainerContent.title}</DialogTitle>
-                        <DialogDescription>&nbsp;</DialogDescription>
+                        <DialogDescription>&nbsp;</DialogDescription> {/* FIX I */}
                     </DialogHeader>
                     <div className="text-left bg-slate-50/50 p-4 rounded-xl border border-slate-100">
                         {explainerContent.text}
