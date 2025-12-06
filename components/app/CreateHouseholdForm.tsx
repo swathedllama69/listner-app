@@ -4,6 +4,8 @@ import { useState } from "react"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Capacitor } from "@capacitor/core"
+// ⚡ FIX: Import BarcodeFormat to solve the type error
+import { BarcodeScanner, BarcodeFormat } from '@capacitor-mlkit/barcode-scanning';
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -13,15 +15,7 @@ import {
     ChevronLeft, Plus, Sparkles, QrCode
 } from "lucide-react"
 
-const BarcodeScanner = {
-    checkPermissions: async () => ({ camera: 'granted' }),
-    requestPermissions: async () => ({ camera: 'granted' }),
-    scan: async (options?: any) => ({ barcodes: [{ rawValue: 'MOCK_CODE_123' }] })
-};
-const BarcodeFormat = { QrCode: 'QR_CODE' };
-
 export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, onHouseholdCreated: (user: User) => void }) {
-    // ⚡ FIX: Removed 'profile_setup' and 'currency_setup'. Only create or join.
     const [view, setView] = useState<'choice' | 'create_input' | 'join_input'>('choice');
 
     const [loading, setLoading] = useState(false)
@@ -29,7 +23,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
     const [inviteCode, setInviteCode] = useState("")
     const [error, setError] = useState<string | null>(null)
 
-    // --- STEP 1: HOUSEHOLD/JOIN LOGIC ---
     const handleHouseholdSubmit = async (overrideCode?: string) => {
         const codeToUse = overrideCode || inviteCode;
         setLoading(true); setError(null);
@@ -38,7 +31,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
             if (view === 'create_input') {
                 const { data: hh, error: hhError } = await supabase.from('households').insert({
                     name: name,
-                    // Default values, will be updated in OnboardingWizard later
                     currency: 'NGN',
                     country: 'Nigeria',
                 }).select().single();
@@ -68,8 +60,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     if (joinError) throw joinError;
                 }
             }
-
-            // ⚡ FIX: Immediately finish. The 'OnboardingWizard' in Dashboard will handle name/photo/currency.
             onHouseholdCreated(user);
 
         } catch (err: any) {
@@ -80,7 +70,6 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
 
     const handleScan = async () => {
         if (!Capacitor.isNativePlatform()) {
-            // ⚡ FIX: Removed Mock Code auto-fill. Now alerts user.
             alert("QR Code scanner is only available on the mobile app.");
             return;
         }
@@ -90,11 +79,11 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 const result = await BarcodeScanner.requestPermissions();
                 if (result.camera !== 'granted' && result.camera !== 'limited') return;
             }
+            // ⚡ FIX: Use BarcodeFormat.QrCode (Enum) instead of raw number 11
             const { barcodes } = await BarcodeScanner.scan({ formats: [BarcodeFormat.QrCode] });
             if (barcodes.length > 0 && barcodes[0].rawValue) {
-                const scannedCode = barcodes[0].rawValue;
-                setInviteCode(scannedCode);
-                handleHouseholdSubmit(scannedCode);
+                setInviteCode(barcodes[0].rawValue);
+                handleHouseholdSubmit(barcodes[0].rawValue);
             }
         } catch (e: any) {
             if (!e.message?.includes('canceled')) alert("Scanner error: " + e.message);
@@ -150,6 +139,5 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
             </div>
         )
     }
-
     return null;
 }

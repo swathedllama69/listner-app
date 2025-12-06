@@ -251,6 +251,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     const fetchLists = async () => {
         setIsLoading(true)
         try {
+            // Parallel Fetching for speed
             const [listsResult, summariesResult] = await Promise.all([
                 supabase.from("lists").select("*").eq("household_id", household.id).eq("list_type", listType).order("created_at", { ascending: true }),
                 supabase.rpc(listType === 'shopping' ? 'get_shopping_list_summaries' : 'get_wishlist_summaries', { target_household_id: household.id })
@@ -284,8 +285,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
     };
 
     useEffect(() => { fetchLists() }, [household.id, listType, refreshTrigger]);
-
-    // ⚡ EXPLAINER POPUP REMOVED: Auto-trigger deleted.
 
     const handleUpdateList = (updated: List) => setLists(lists.map(l => l.id === updated.id ? { ...l, ...updated } : l));
     const handleDeleteList = async () => {
@@ -325,17 +324,17 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     if (selectedList) {
         return (
-            // ⚡ FIX: z-50 for detail view clickability
-            <div className="w-full animate-in slide-in-from-right-4 fade-in duration-300 relative z-[50]">
-                {/* ⚡ FIX: Neutral back button */}
-                <Button
-                    variant="ghost"
-                    onClick={handleBack}
-                    className="mb-2 bg-slate-100/70 hover:bg-slate-100 text-slate-600 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm hover:shadow-md transition-all border border-slate-200 cursor-pointer pointer-events-auto"
-                >
-                    <ArrowLeft className="w-4 h-4" /> Back to Lists
-                </Button>
-                {listType === 'wishlist' ? <ListDetail user={user} list={selectedList} currencySymbol={currencySymbol} /> : <ShoppingList user={user} list={selectedList} currencySymbol={currencySymbol} />}
+            <div className="fixed inset-0 z-[100] bg-slate-50 animate-in slide-in-from-right-10 duration-300 overflow-y-auto">
+                <div className="w-full min-h-full p-4 pt-14 pb-32">
+                    <Button
+                        variant="ghost"
+                        onClick={handleBack}
+                        className="mb-4 bg-white/80 backdrop-blur hover:bg-white text-slate-600 rounded-xl gap-2 pl-3 pr-4 font-bold shadow-sm border border-slate-200"
+                    >
+                        <ArrowLeft className="w-4 h-4" /> Back to Lists
+                    </Button>
+                    {listType === 'wishlist' ? <ListDetail user={user} list={selectedList} currencySymbol={currencySymbol} /> : <ShoppingList user={user} list={selectedList} currencySymbol={currencySymbol} />}
+                </div>
             </div>
         )
     }
@@ -449,6 +448,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                                 {getListIcon(list)}
                                             </div>
                                             <h3 className="font-bold text-slate-800 text-lg mb-0 truncate flex-1">{list.name}</h3>
+
                                             {list.is_private && <Lock className="w-5 h-5 text-red-500 fill-red-50 stroke-[2.5]" />}
                                         </div>
 
@@ -487,7 +487,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                     <DialogHeader className="flex flex-col items-center">
                         <div className="bg-slate-50 p-4 rounded-full mb-4">{explainerContent.icon}</div>
                         <DialogTitle className="text-xl font-bold text-slate-800">{explainerContent.title}</DialogTitle>
-                        <DialogDescription>&nbsp;</DialogDescription> {/* FIX I */}
+                        <DialogDescription>&nbsp;</DialogDescription>
                     </DialogHeader>
                     <div className="text-left bg-slate-50/50 p-4 rounded-xl border border-slate-100">
                         {explainerContent.text}
@@ -526,7 +526,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
     const currencySymbol = getCurrencySymbol(household.currency || 'NGN');
 
-    // ⚡ FIX C: Standalone function to fetch member count
     const fetchMemberCount = async () => {
         const cacheKey = CACHE_KEYS.MEMBER_COUNT(household.id);
         const { count } = await supabase.from('household_members').select('*', { count: 'exact', head: true }).eq('household_id', household.id);
@@ -581,12 +580,10 @@ export function Dashboard({ user, household }: { user: User, household: Househol
         const savedExplainers = localStorage.getItem(`listner_explainers_${user.id}`);
         if (savedExplainers) setDismissedExplainers(JSON.parse(savedExplainers));
 
-        // ⚡ FIX C: Initial fetch of member count
         fetchMemberCount();
 
     }, [household.id, user, isListDetailActive, isFabOpen, activeTab]);
 
-    // ⚡ FIX C: Re-fetch member count on global refresh
     useEffect(() => {
         if (refreshKey > 0) {
             fetchMemberCount();
@@ -608,15 +605,13 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
     const handleGlobalRefresh = async () => {
         setRefreshKey(prev => prev + 1);
-        // The fetchMemberCount is triggered by the useEffect above
         await new Promise(resolve => setTimeout(resolve, 1000));
     };
 
-    // ⚡ FIX L: Removed window.location.reload() for background refresh
     const handleOnboardingComplete = () => {
         localStorage.setItem(`tutorial_seen_${user.id}`, "true");
         setShowOnboarding(false);
-        handleGlobalRefresh(); // Background refresh to update image/details
+        handleGlobalRefresh();
     }
 
     const getGreeting = () => { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"; }
@@ -629,7 +624,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                 <div className="pt-4 px-1 mb-6 space-y-4">
                     <div className="flex justify-between items-center">
                         <div onClick={() => setActiveTab('settings')} className="cursor-pointer active:opacity-70 transition-opacity">
-                            {/* ⚡ FIX K: Subtle enhancement (font weight, tracking) */}
                             <h1 className="text-xl font-bold text-slate-800 tracking-tight">{activeTab === 'home' ? 'Dashboard' : activeTab === 'settings' ? 'Settings' : activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}</h1>
                             {activeTab === 'home' && <p className="text-sm text-slate-500 font-medium">{getGreeting()}, {userName}</p>}
                         </div>
@@ -639,14 +633,11 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                                 {hideBalances ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </Button>
 
-                            {/* ⚡ FIX C: Responsive Sync/Settings Button Logic */}
                             {memberCount <= 1 ? (
-                                // Case 1: Solo User (Show Sync)
                                 <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-lime-500 text-slate-900 rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-lime-600">
                                     <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Sync
                                 </Button>
                             ) : (
-                                // Case 2: Household > 1 (Hide Sync on Desktop, Show Settings on Mobile)
                                 <div className="md:hidden">
                                     <Button onClick={() => setActiveTab('settings')} size="icon" className="bg-lime-500 text-slate-900 rounded-full h-8 w-8 shadow-sm hover:bg-lime-600 p-0 flex items-center justify-center">
                                         <Settings className="w-4 h-4" />
@@ -744,7 +735,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     <PortalFAB onClick={() => setIsFabOpen(true)} className={`h-16 w-16 rounded-full shadow-2xl bg-lime-400 hover:bg-lime-500 text-slate-900 flex items-center justify-center transition-all hover:scale-105 active:scale-95 hover:rotate-90 duration-300`} icon={Plus} />
                 )}
 
-                {/* ⚡ RENDER ONBOARDING IF NOT COMPLETE */}
                 {showOnboarding && <OnboardingWizard user={user} household={household} onComplete={handleOnboardingComplete} />}
 
                 <CreateMenu
@@ -766,7 +756,6 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                     onJoinSuccess={() => window.location.reload()}
                 />
             </div>
-            {/* ⚡ FINAL: TOASTER COMPONENT PLACED HERE */}
             <Toaster position="bottom-center" />
         </SidebarLayout>
     )
