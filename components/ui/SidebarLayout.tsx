@@ -1,3 +1,4 @@
+//
 "use client"
 
 import { LayoutDashboard, ListChecks, ShoppingCart, HandCoins, Settings, User as UserIcon, LogOut, ChevronUp } from "lucide-react"
@@ -37,7 +38,6 @@ export function SidebarLayout({ children, user, household, memberCount, activeTa
 
     const handleSignOut = async () => { await supabase.auth.signOut(); window.location.reload(); }
 
-    // Fallback to App Logo if no household icon
     const householdIconUrl = household.avatar_url || '/logo-icon.png';
 
     return (
@@ -114,20 +114,27 @@ export function SidebarLayout({ children, user, household, memberCount, activeTa
             </aside>
 
             {/* --- 2. MAIN CONTENT --- */}
-            <main className="flex-1 w-full min-w-0 pb-24 md:pb-8 relative z-10 pt-16 md:pt-0"> {/* Added pt-16 for fixed header */}
+            <main className="flex-1 w-full min-w-0 pb-24 md:pb-8 relative z-10 pt-16 md:pt-0">
 
-                {/* Mobile Header - Fixed */}
-                <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white/70 backdrop-blur-xl border-b border-white/40 px-4 py-3 flex justify-between items-center shadow-sm pt-[env(safe-area-inset-top)]">
+                {/* Mobile Header - ENHANCED VISUALS */}
+                <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white/60 backdrop-blur-xl border-b border-white/40 px-4 py-3 flex justify-between items-center shadow-sm pt-[env(safe-area-inset-top)] transition-all">
+                    {/* Header Background Blobs */}
+                    <div className="absolute inset-0 overflow-hidden pointer-events-none z-[-1]">
+                        <div className="absolute -top-10 -left-10 w-32 h-32 bg-teal-200/30 rounded-full blur-3xl"></div>
+                        <div className="absolute top-0 right-0 w-40 h-40 bg-emerald-200/20 rounded-full blur-3xl"></div>
+                        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-5"></div>
+                    </div>
+
                     <div
                         className="flex items-center gap-2.5 cursor-pointer active:opacity-70 transition-opacity"
                         onClick={() => setActiveTab('home')}
                     >
-                        <img src={householdIconUrl} alt="HH" className="h-8 w-8 rounded-lg object-cover shadow-md bg-white" />
+                        <img src={householdIconUrl} alt="HH" className="h-8 w-8 rounded-lg object-cover shadow-md bg-white border border-white/50" />
                         <h1 className="text-lg font-bold text-slate-900 truncate max-w-[200px]">{householdName}</h1>
                     </div>
 
                     <DropdownMenu>
-                        <DropdownMenuTrigger>{userAvatar ? <img src={userAvatar} alt="Profile" className="h-8 w-8 rounded-full border border-white shadow-sm object-cover" /> : <div className="h-8 w-8 rounded-full bg-slate-100 border border-white flex items-center justify-center text-slate-600 text-xs font-bold">{userInitials}</div>}</DropdownMenuTrigger>
+                        <DropdownMenuTrigger>{userAvatar ? <img src={userAvatar} alt="Profile" className="h-8 w-8 rounded-full border border-white shadow-sm object-cover" /> : <div className="h-8 w-8 rounded-full bg-white border border-slate-100 shadow-sm flex items-center justify-center text-slate-600 text-xs font-bold">{userInitials}</div>}</DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-48 rounded-xl bg-white/90 backdrop-blur-xl border-white/40 shadow-xl">
                             <DropdownMenuItem onClick={() => setActiveTab('settings')}><Settings className="w-4 h-4 mr-2" /> Settings</DropdownMenuItem>
                             <DropdownMenuSeparator className="bg-slate-200/50" />
@@ -141,21 +148,23 @@ export function SidebarLayout({ children, user, household, memberCount, activeTa
                 </div>
             </main>
 
-            {/* --- 3. MOBILE NAV - UPDATED --- */}
-            <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-xl border-t border-white/40 z-40 shadow-[0_-4px_30px_-5px_rgba(0,0,0,0.1)] pb-safe">
-                {/* Increased height to h-20 and added pb-2 for lift */}
-                <div className="flex justify-around items-center h-20 pb-2 px-2">
-                    {navItems.map(item => {
-                        const isActive = activeTab === item.value;
-                        return (
-                            <button key={item.value} onClick={() => setActiveTab(item.value)} className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-all duration-200 active:scale-90 feedback-button`}>
-                                <div className={`p-1.5 rounded-full transition-colors duration-300 ${isActive ? 'bg-slate-900 text-lime-400 shadow-lg shadow-slate-900/20' : 'text-slate-400'}`}>
-                                    <item.icon className="w-6 h-6" /> {/* Slightly larger icons */}
-                                </div>
-                                <span className={`text-[10px] font-medium transition-colors ${isActive ? 'text-slate-900' : 'text-slate-400'}`}>{item.label}</span>
-                            </button>
-                        )
-                    })}
+            {/* --- 3. MOBILE NAV - LIFTED & ENHANCED --- */}
+            <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40">
+                <div className="bg-white/80 backdrop-blur-xl border-t border-white/40 shadow-[0_-4px_30px_-5px_rgba(0,0,0,0.1)] pb-safe">
+                    {/* Added padding bottom (pb-6) to lift icons up */}
+                    <div className="flex justify-around items-center h-20 pb-5 px-2 pt-2">
+                        {navItems.map(item => {
+                            const isActive = activeTab === item.value;
+                            return (
+                                <button key={item.value} onClick={() => setActiveTab(item.value)} className={`flex flex-col items-center justify-center w-full h-full space-y-1 transition-all duration-200 active:scale-90`}>
+                                    <div className={`p-1.5 rounded-2xl transition-all duration-300 ${isActive ? 'bg-slate-900 text-lime-400 shadow-lg shadow-slate-900/20 translate-y-[-2px]' : 'text-slate-400'}`}>
+                                        <item.icon className="w-6 h-6" />
+                                    </div>
+                                    <span className={`text-[10px] font-bold transition-colors ${isActive ? 'text-slate-900' : 'text-slate-400'}`}>{item.label}</span>
+                                </button>
+                            )
+                        })}
+                    </div>
                 </div>
             </nav>
         </div>

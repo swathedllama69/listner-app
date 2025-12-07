@@ -1,3 +1,4 @@
+//
 "use client"
 
 import { useState, useEffect, FormEvent, useRef } from "react"
@@ -10,8 +11,8 @@ import {
     DollarSign, Wallet, History, HandCoins, Pencil, Trash2,
     ChevronDown, ChevronLeft, ChevronRight, Download,
     Lightbulb, FileSpreadsheet, User as UserIcon, Home as HomeIcon,
-    Plus, RefreshCw, Undo2, ShoppingBasket, Car, Zap, Home, Ticket, Gift,
-    Briefcase, Coffee, GraduationCap, HeartPulse, MoreHorizontal, Sun, AlertTriangle
+    Plus, ShoppingBasket, Car, Undo2, Zap, Home, Ticket,
+    MoreHorizontal, Sun, AlertTriangle
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -27,23 +28,22 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { EXPENSE_CATEGORIES } from "@/lib/constants"
 import { Capacitor } from "@capacitor/core"
 import { Share } from "@capacitor/share"
-// ⚡ FIX: Import Haptics and ImpactStyle
 import { Haptics, ImpactStyle } from "@capacitor/haptics"
-import toast, { Toaster } from 'react-hot-toast'
+import toast from 'react-hot-toast'
 
 type HouseholdMember = { user_id: string; email: string }
 type Expense = { id: number; name: string; amount: number; category: string; user_id: string; notes: string | null; expense_date: string; scope: 'household' | 'personal' }
 type Credit = { id: number; amount: number; notes: string | null; is_settled: boolean; lender_user_id: string | null; lender_name: string; borrower_user_id: string | null; borrower_name: string; created_at: string; scope: 'household' | 'personal' }
 
 const CATEGORY_ICONS: Record<string, any> = {
-    "Groceries": { icon: ShoppingBasket, color: "text-emerald-600", bg: "bg-emerald-100" },
-    "Transport": { icon: Car, color: "text-blue-600", bg: "bg-blue-100" },
-    "Utilities": { icon: Zap, color: "text-yellow-600", bg: "bg-yellow-100" },
-    "Rent/Mortgage": { icon: Home, color: "text-indigo-600", bg: "bg-indigo-100" },
-    "Entertainment": { icon: Ticket, color: "text-pink-600", bg: "bg-pink-100" },
-    "Personal": { icon: Sun, color: "text-orange-600", bg: "bg-orange-100" },
-    "Subscriptions": { icon: Zap, color: "text-purple-600", bg: "bg-purple-100" },
-    "Other": { icon: MoreHorizontal, color: "text-gray-600", bg: "bg-gray-100" }
+    "Groceries": { icon: ShoppingBasket, color: "text-emerald-700", bg: "bg-emerald-100", fill: "bg-emerald-400" },
+    "Transport": { icon: Car, color: "text-blue-700", bg: "bg-blue-100", fill: "bg-blue-400" },
+    "Utilities": { icon: Zap, color: "text-amber-700", bg: "bg-amber-100", fill: "bg-amber-400" },
+    "Rent/Mortgage": { icon: Home, color: "text-indigo-700", bg: "bg-indigo-100", fill: "bg-indigo-400" },
+    "Entertainment": { icon: Ticket, color: "text-pink-700", bg: "bg-pink-100", fill: "bg-pink-400" },
+    "Personal": { icon: Sun, color: "text-orange-700", bg: "bg-orange-100", fill: "bg-orange-400" },
+    "Subscriptions": { icon: Zap, color: "text-purple-700", bg: "bg-purple-100", fill: "bg-purple-400" },
+    "Other": { icon: MoreHorizontal, color: "text-slate-700", bg: "bg-slate-200", fill: "bg-slate-400" }
 };
 
 const getCategoryIcon = (category: string) => {
@@ -189,13 +189,14 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
         <TooltipProvider>
             <div className="w-full relative min-h-[80vh] flex flex-col bg-slate-50/50">
                 <div className="px-4 pt-2 pb-4">
-                    {/* ⚡ FIX H1: Changed rounded-2xl to rounded-md */}
-                    <div className={`rounded-md px-6 py-3 flex items-center justify-between shadow-md ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
-                        <div className="flex flex-col">
-                            <span className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest">Net Position</span>
-                            {!isZero && <span className="text-[10px] font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
+                    {/* Hero Net Position Card - Kept Colorful/Gradient */}
+                    <div className={`rounded-2xl px-6 py-5 flex items-center justify-between shadow-sm relative overflow-hidden ${isPositive ? 'bg-gradient-to-r from-emerald-600 to-teal-600' : 'bg-gradient-to-r from-rose-600 to-orange-600'} text-white`}>
+                        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                        <div className="flex flex-col relative z-10">
+                            <span className="text-[10px] font-bold text-white/80 uppercase tracking-widest mb-1">Net Position</span>
+                            {!isZero && <span className="text-xs font-medium text-white/90">{isPositive ? "You are owed" : "You owe"}</span>}
                         </div>
-                        <div className="text-2xl font-bold tracking-tight">
+                        <div className="text-3xl font-bold tracking-tight relative z-10">
                             {isPositive && !isZero ? '+' : ''}{currencySymbol}{displayBalance}
                         </div>
                     </div>
@@ -204,13 +205,12 @@ export function Finance({ user, household, currencySymbol, hideBalances, refresh
                 <Tabs defaultValue="summary" className="w-full">
                     <div className="flex items-center justify-between mb-4 px-1">
                         <TabsList className="flex w-full sm:w-auto bg-slate-100/80 p-1 rounded-xl gap-1 overflow-x-auto no-scrollbar">
-                            <TabsTrigger value="summary" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-indigo-600 data-[state=active]:text-white transition-all"><DollarSign className="w-3.5 h-3.5 mr-1" /> Summary</TabsTrigger>
-                            <TabsTrigger value="expenses" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-teal-600 data-[state=active]:text-white transition-all"><History className="w-3.5 h-3.5 mr-1" /> Expenses</TabsTrigger>
-                            <TabsTrigger value="credit" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-rose-600 data-[state=active]:text-white transition-all"><HandCoins className="w-3.5 h-3.5 mr-1" /> Debts</TabsTrigger>
+                            <TabsTrigger value="summary" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm transition-all"><DollarSign className="w-3.5 h-3.5 mr-1" /> Summary</TabsTrigger>
+                            <TabsTrigger value="expenses" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm transition-all"><History className="w-3.5 h-3.5 mr-1" /> Expenses</TabsTrigger>
+                            <TabsTrigger value="credit" className="flex-1 sm:flex-none px-4 py-2 rounded-lg text-xs font-bold text-slate-500 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm transition-all"><HandCoins className="w-3.5 h-3.5 mr-1" /> Debts</TabsTrigger>
                         </TabsList>
 
                         <DropdownMenu>
-                            {/* ⚡ FIX: Export dropdown only visible on desktop (sm:flex) */}
                             <DropdownMenuTrigger asChild>
                                 <Button variant="outline" size="sm" className="hidden sm:flex gap-2 ml-2 border-slate-200 text-slate-600 bg-white">
                                     <Download className="w-4 h-4" /> Export <ChevronDown className="w-3 h-3 opacity-50" />
@@ -276,58 +276,86 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances,
         .slice(0, 3);
 
     const format = (val: number) => hideBalances ? '****' : val.toLocaleString();
+    const currentMonthName = new Date().toLocaleString('default', { month: 'long' });
+
+    // Calculate Treemap Sizing
+    const totalTop3 = top3Categories.reduce((s, c) => s + c.amount, 0);
 
     return (
         <div className="space-y-4 p-2">
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
 
-                <Card className="rounded-xl border-none shadow-md bg-indigo-600 text-white h-28 flex flex-col justify-center relative overflow-hidden">
-                    <div className="absolute right-2 top-2 opacity-20"><History className="w-8 h-8" /></div>
-                    <CardHeader className="p-4 pb-0"><CardTitle className="text-[10px] font-bold text-indigo-100 uppercase">{now.toLocaleString('default', { month: 'short' })} Spend</CardTitle></CardHeader>
-                    <CardContent className="p-4 pt-1">
-                        <div className="text-2xl font-bold">{currencySymbol}{format(currentMonthExpenses)}</div>
-                        <p className="text-[10px] text-indigo-200 mt-1">Prev: {currencySymbol}{format(lastMonthExpenses)}</p>
-                    </CardContent>
-                </Card>
-
-                <Card className="rounded-xl border-none shadow-md bg-amber-500 text-white h-28 flex flex-col justify-center relative overflow-hidden">
-                    <div className="absolute right-2 top-2 opacity-20"><HandCoins className="w-8 h-8" /></div>
-                    <CardHeader className="p-4 pb-0"><CardTitle className="text-[10px] font-bold text-amber-100 uppercase">Outstanding</CardTitle></CardHeader>
-                    <CardContent className="p-4 pt-1 flex flex-col justify-center h-full">
-                        <div className="flex justify-between items-end border-b border-amber-400/30 pb-1 mb-1">
-                            <span className="text-xs font-medium text-amber-100">You Owe</span>
-                            <span className="text-lg font-bold">{currencySymbol}{format(iOwe)}</span>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <span className="text-xs font-medium text-amber-100">Owed to You</span>
-                            <span className="text-lg font-bold">{currencySymbol}{format(iAmOwed)}</span>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card className="rounded-xl border-none shadow-md bg-purple-600 text-white h-28 flex flex-col justify-center relative overflow-hidden">
-                    <div className="absolute right-2 top-2 opacity-20"><Lightbulb className="w-8 h-8" /></div>
-                    <CardHeader className="p-3 pb-0"><CardTitle className="text-[10px] font-bold text-purple-100 uppercase">Top Spending</CardTitle></CardHeader>
-                    <CardContent className="p-3 pt-1 flex flex-col justify-center gap-1.5 h-full">
-                        {top3Categories.length === 0 ? (
-                            <p className="text-xs text-purple-100 opacity-70">No data yet</p>
-                        ) : (
-                            top3Categories.map((item, idx) => {
-                                const percent = totalExpenses > 0 ? (item.amount / totalExpenses) * 100 : 0;
-                                return (
-                                    <div key={idx} className="w-full">
-                                        <div className="flex justify-between text-[10px] font-medium mb-0.5 leading-none">
-                                            <span className="truncate max-w-[80px]">{item.category}</span>
-                                            <span>{Math.round(percent)}%</span>
-                                        </div>
-                                        <div className="w-full h-1.5 bg-purple-800/30 rounded-full overflow-hidden">
-                                            <div className="h-full bg-purple-200" style={{ width: `${percent}%` }}></div>
-                                        </div>
-                                    </div>
-                                )
-                            })
+                {/* CARD 1: SPEND (Soft Blue) */}
+                <Card className="rounded-2xl border-none shadow-sm bg-indigo-50/50 h-36 flex flex-col justify-between p-5 relative overflow-hidden">
+                    <div className="flex justify-between items-start">
+                        <div className="p-2 bg-white text-indigo-600 rounded-xl shadow-sm"><Wallet className="w-5 h-5" /></div>
+                        {lastMonthExpenses > 0 && (
+                            <Badge variant="secondary" className="bg-white/60 text-indigo-600 font-normal text-[10px]">
+                                Prev: {currencySymbol}{format(lastMonthExpenses)}
+                            </Badge>
                         )}
-                    </CardContent>
+                    </div>
+                    <div>
+                        <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-wider mb-1">{currentMonthName} Spend</p>
+                        <div className="text-2xl font-bold text-indigo-900">{currencySymbol}{format(currentMonthExpenses)}</div>
+                    </div>
+                </Card>
+
+                {/* CARD 2: OUTSTANDING (Soft Amber) */}
+                <Card className="rounded-2xl border-none shadow-sm bg-amber-50/50 h-36 flex flex-col justify-between p-5 relative overflow-hidden">
+                    <div className="flex justify-between items-start">
+                        <div className="p-2 bg-white text-amber-600 rounded-xl shadow-sm"><HandCoins className="w-5 h-5" /></div>
+                    </div>
+                    <div className="flex gap-4">
+                        <div>
+                            <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1">You Owe</p>
+                            <div className="text-xl font-bold text-rose-600">{currencySymbol}{format(iOwe)}</div>
+                        </div>
+                        <div className="w-[1px] bg-amber-200/50 h-full"></div>
+                        <div>
+                            <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1">Owed</p>
+                            <div className="text-xl font-bold text-emerald-600">{currencySymbol}{format(iAmOwed)}</div>
+                        </div>
+                    </div>
+                </Card>
+
+                {/* CARD 3: TOP SPENDING (Treemap / Mosaic) */}
+                <Card className="rounded-2xl border-none shadow-sm bg-slate-50 h-36 relative overflow-hidden flex flex-col">
+                    <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between space-y-0">
+                        <CardTitle className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Top Categories</CardTitle>
+                        <Lightbulb className="w-4 h-4 text-slate-300" />
+                    </CardHeader>
+
+                    {top3Categories.length === 0 ? (
+                        <div className="flex-1 flex items-center justify-center text-xs text-slate-300 italic pb-2">No data yet</div>
+                    ) : (
+                        <div className="flex-1 flex w-full h-full p-1 gap-1">
+                            {/* Primary Box (Largest) */}
+                            <div className="h-full rounded-lg relative overflow-hidden flex flex-col justify-end p-2 transition-all hover:opacity-90"
+                                style={{ width: `${60}%`, backgroundColor: '#f1f5f9' }}>
+                                {/* Dynamic background fill */}
+                                <div className={`absolute inset-0 opacity-20 ${CATEGORY_ICONS[top3Categories[0].category]?.fill || 'bg-slate-500'}`}></div>
+                                <span className="relative z-10 text-xs font-bold text-slate-700 truncate">{top3Categories[0].category}</span>
+                                <span className="relative z-10 text-[10px] font-medium text-slate-500">{Math.round((top3Categories[0].amount / totalExpenses) * 100)}%</span>
+                            </div>
+
+                            {/* Secondary Column */}
+                            <div className="flex flex-col gap-1 h-full" style={{ width: `${40}%` }}>
+                                {top3Categories[1] && (
+                                    <div className="flex-1 rounded-lg relative overflow-hidden flex flex-col justify-end p-1.5 transition-all hover:opacity-90 bg-white">
+                                        <div className={`absolute inset-0 opacity-15 ${CATEGORY_ICONS[top3Categories[1].category]?.fill || 'bg-slate-500'}`}></div>
+                                        <span className="relative z-10 text-[10px] font-bold text-slate-700 truncate">{top3Categories[1].category}</span>
+                                    </div>
+                                )}
+                                {top3Categories[2] && (
+                                    <div className="flex-1 rounded-lg relative overflow-hidden flex flex-col justify-end p-1.5 transition-all hover:opacity-90 bg-white">
+                                        <div className={`absolute inset-0 opacity-10 ${CATEGORY_ICONS[top3Categories[2].category]?.fill || 'bg-slate-500'}`}></div>
+                                        <span className="relative z-10 text-[10px] font-bold text-slate-700 truncate">{top3Categories[2].category}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </Card>
             </div >
 
@@ -357,6 +385,7 @@ function FinanceSummary({ expenses, credits, user, currencySymbol, hideBalances,
     )
 }
 
+// ... (ExpensesList and CreditsList components remain exactly the same as before)
 function ExpensesList({ user, household, members, expenses, setExpenses, currencySymbol, hideBalances, viewScope, isLoading }: { user: User, household: Household, members: HouseholdMember[], expenses: Expense[], setExpenses: React.Dispatch<React.SetStateAction<Expense[]>>, currencySymbol: string, hideBalances?: boolean, viewScope: string, isLoading: boolean }) {
     const defaultScope = viewScope === 'solo' ? 'personal' : 'household';
 

@@ -1,7 +1,7 @@
 //
 "use client"
 
-import { useState, useEffect, FormEvent, useRef } from "react"
+import { useState, useEffect, FormEvent, useRef } from "react" // ⚡ FIX: Added FormEvent
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
@@ -11,7 +11,7 @@ import { StatusBar, Style } from "@capacitor/status-bar"
 import { PushNotifications } from "@capacitor/push-notifications"
 
 // UI Imports
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card" // ⚡ FIX: Added CardHeader, CardContent
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -71,7 +71,6 @@ function PortalFAB({ onClick, className, icon: Icon }: any) {
     useEffect(() => setMounted(true), []);
     if (!mounted) return null;
     return createPortal(
-        // ⚡ FIX: Added pointer-events-none to container, auto to button. This prevents the invisible box from blocking clicks.
         <div className="fixed bottom-24 right-4 md:bottom-8 md:right-8 z-[100] animate-in zoom-in duration-300 pointer-events-none">
             <Button onClick={onClick} className={`${className} shadow-2xl border-4 border-white/20 active:scale-90 transition-transform pointer-events-auto`}>
                 <Icon className="w-8 h-8" />
@@ -326,7 +325,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
 
     if (selectedList) {
         return (
-            // ⚡ FIX: Added overflow-y-auto to allow scrolling list content
             <div className="fixed inset-0 z-[100] bg-slate-50 animate-in slide-in-from-right-10 duration-300 overflow-y-auto pointer-events-auto">
                 <div className="w-full min-h-full p-4 pt-14 pb-32">
                     {/* Back button needs explicit pointer-events to be clickable inside the overall auto-capture */}
@@ -453,6 +451,7 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                             </div>
                                             <h3 className="font-bold text-slate-800 text-lg mb-0 truncate flex-1">{list.name}</h3>
 
+                                            {/* ⚡ RED PADLOCK */}
                                             {list.is_private && <Lock className="w-5 h-5 text-red-500 fill-red-50 stroke-[2.5]" />}
                                         </div>
 
@@ -637,13 +636,14 @@ export function Dashboard({ user, household }: { user: User, household: Househol
                                 {hideBalances ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                             </Button>
 
+                            {/* ⚡ LOGIC: Sync vs Settings Button based on member count */}
                             {memberCount <= 1 ? (
                                 <Button onClick={() => setIsSyncOpen(true)} size="sm" className="bg-lime-500 text-slate-900 rounded-full text-xs h-8 px-3 font-bold shadow-sm hover:bg-lime-600">
                                     <UserPlus className="w-3.5 h-3.5 mr-1.5" /> Sync
                                 </Button>
                             ) : (
                                 <div className="md:hidden">
-                                    <Button onClick={() => setActiveTab('settings')} size="icon" className="bg-lime-500 text-slate-900 rounded-full h-8 w-8 shadow-sm hover:bg-lime-600 p-0 flex items-center justify-center">
+                                    <Button onClick={() => setActiveTab('settings')} size="icon" className="bg-slate-100 text-slate-500 rounded-full h-8 w-8 shadow-sm hover:bg-slate-200 p-0 flex items-center justify-center">
                                         <Settings className="w-4 h-4" />
                                     </Button>
                                 </div>
