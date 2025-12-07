@@ -2,7 +2,6 @@
 "use client"
 
 import { useState, useEffect, FormEvent, useRef } from "react"
-// ... (Keep existing imports)
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
@@ -11,14 +10,14 @@ import { App as CapApp } from "@capacitor/app"
 import { StatusBar, Style } from "@capacitor/status-bar"
 import { PushNotifications } from "@capacitor/push-notifications"
 
-// ... (Keep UI imports same as before)
+// UI Imports
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger, DialogDescription } from "@/components/ui/dialog"
-import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt, Loader2, ArrowDown, ListChecks, CheckCircle2, Goal, TrendingUp, ArrowDownRight, User as UserIcon, Settings } from "lucide-react"
+import { Plus, UserPlus, Eye, EyeOff, Target, ShoppingCart, Lock, Trash2, Pencil, PiggyBank, X, Info, Wallet, ArrowLeft, Receipt, Loader2, ArrowDown, ListChecks, CheckCircle2, Goal, TrendingUp, ArrowDownRight, User as UserIcon, Settings, Globe } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Progress } from "@/components/ui/progress"
@@ -40,7 +39,7 @@ import { compressImage } from "@/lib/utils"
 import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
 import toast, { Toaster } from 'react-hot-toast'
 
-// ... (Keep Types: ListWithSummary, ListSummary) ...
+// --- TYPES ---
 type ListWithSummary = List & {
     pending_items?: number; estimated_cost?: number;
     active_goals?: number; target_amount?: number; saved_amount?: number;
@@ -52,10 +51,7 @@ type ListSummary = {
     total_goals?: number; completed_goals?: number;
 };
 
-// ... (Keep Helper Components: ConfirmDialog, PortalFAB, PullToRefresh, CreateMenu, ListManager, EditListDialog) ...
-// (I will omit repeating the helper component code here to save space, assume they are unchanged from the previous correct version. 
-//  IMPORTANT: When you copy this, ensure you keep the definitions of ConfirmDialog, PortalFAB, PullToRefresh, CreateMenu, ListManager, and EditListDialog inside this file.)
-
+// --- AUXILIARY HELPER COMPONENTS ---
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -125,6 +121,7 @@ function PullToRefresh({ onRefresh, children }: { onRefresh: () => Promise<void>
     );
 }
 
+// --- CREATE MENU ---
 function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess, currencySymbol, viewScope }: {
     isOpen: boolean, onOpenChange: (open: boolean) => void, context: string, user: User, household: Household, onSuccess: () => void, currencySymbol: string, viewScope: 'unified' | 'household' | 'solo'
 }) {
@@ -216,11 +213,37 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
                     <div className={`p-3 rounded-xl border mb-2 ${isWishlist ? 'bg-emerald-50 border-emerald-100' : 'bg-lime-50 border-lime-100'}`}>
                         <p className={`text-xs leading-relaxed ${isWishlist ? 'text-emerald-800' : 'text-lime-800'}`}>{isWishlist ? "Create a new Wishlist Collection to track savings and targets." : "Create a new Shopping List for your household's active purchases."}</p>
                     </div>
-                    <div className="space-y-1"><Label>{mode === 'shopping' ? 'Shopping List Name' : 'Wishlist Name'}</Label><Input placeholder={mode === 'shopping' ? "e.g. Monthly Groceries" : "e.g. Vacation Fund"} value={listForm.name} onChange={e => setListForm({ ...listForm, name: e.target.value })} className="bg-slate-50 border-slate-200 h-11" /></div>
-                    <div className="flex items-center space-x-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                        <Checkbox id="priv-check" checked={listForm.isPrivate} onCheckedChange={(c) => setListForm({ ...listForm, isPrivate: c as boolean })} />
-                        <Label htmlFor="priv-check" className="text-sm font-medium text-slate-600">{listForm.isPrivate ? <span className="text-rose-600 font-bold">Private Wishlist (Private)</span> : <span className="text-emerald-600 font-bold">Household Wishlist (Shared)</span>}</Label>
+
+                    <div className="space-y-1"><Label>{mode === 'shopping' ? 'List Name' : 'Wishlist Name'}</Label><Input placeholder={mode === 'shopping' ? "e.g. Monthly Groceries" : "e.g. Vacation Fund"} value={listForm.name} onChange={e => setListForm({ ...listForm, name: e.target.value })} className="bg-slate-50 border-slate-200 h-11" /></div>
+
+                    {/* Visual Visibility Toggle */}
+                    <div className="space-y-3 pt-1">
+                        <Label>Visibility</Label>
+                        <div className="flex gap-3">
+                            <button
+                                type="button"
+                                onClick={() => setListForm({ ...listForm, isPrivate: false })}
+                                className={`flex-1 flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all ${!listForm.isPrivate ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 bg-white text-slate-400 hover:bg-slate-50'}`}
+                            >
+                                <Globe className="w-6 h-6" />
+                                <span className="text-xs font-bold">Shared</span>
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setListForm({ ...listForm, isPrivate: true })}
+                                className={`flex-1 flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all ${listForm.isPrivate ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-100 bg-white text-slate-400 hover:bg-slate-50'}`}
+                            >
+                                <Lock className="w-6 h-6" />
+                                <span className="text-xs font-bold">Private</span>
+                            </button>
+                        </div>
+                        <p className="text-[11px] text-slate-500 text-center font-medium bg-slate-50 p-2 rounded-lg border border-slate-100">
+                            {listForm.isPrivate
+                                ? "🔒 Only you can see and edit this list."
+                                : "🌍 Visible to everyone in your household."}
+                        </p>
                     </div>
+
                     <Button onClick={() => handleList()} className={`w-full h-12 text-base font-medium ${mode === 'shopping' ? 'bg-lime-600 hover:bg-lime-700 text-slate-900' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`} disabled={loading || !listForm.name}>{loading ? 'Creating...' : `Create ${mode === 'shopping' ? 'List' : 'Wishlist'}`}</Button>
                 </div>
             );
@@ -242,6 +265,7 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
     )
 }
 
+// --- LIST MANAGER ---
 function ListManager({ user, household, listType, onListSelected, currencySymbol, refreshTrigger }: { user: User, household: Household, listType: 'wishlist' | 'shopping', onListSelected: (isSelected: boolean) => void, currencySymbol: string, refreshTrigger: number }) {
     const [lists, setLists] = useState<ListWithSummary[]>([])
     const [selectedList, setSelectedList] = useState<List | null>(null)
@@ -329,7 +353,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
         return (
             <div className="fixed inset-0 z-[100] bg-slate-50 animate-in slide-in-from-right-10 duration-300 overflow-y-auto pointer-events-auto">
                 <div className="w-full min-h-full p-4 pt-14 pb-32">
-                    {/* Back button needs explicit pointer-events to be clickable inside the overall auto-capture */}
                     <Button
                         variant="ghost"
                         onClick={handleBack}
@@ -509,7 +532,36 @@ function EditListDialog({ list, onListUpdated }: { list: List, onListUpdated: (l
     const [isPrivate, setIsPrivate] = useState(list.is_private)
     const handleSubmit = async (e: FormEvent) => { e.preventDefault(); const { data, error } = await supabase.from("lists").update({ name, is_private: isPrivate }).eq("id", list.id).select().single(); if (error) toast.error(error.message); else { onListUpdated(data as List); setIsOpen(false); toast.success("List saved"); } }
     return (
-        <Dialog open={isOpen} onOpenChange={setIsOpen}><DialogTrigger asChild><Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100"><Pencil className="w-4 h-4 text-slate-400" /></Button></DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit List</DialogTitle><DialogDescription>Update list name and privacy.</DialogDescription></DialogHeader><form onSubmit={handleSubmit} className="space-y-5 pt-2"><div><Label>List Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5 h-11" /></div><div className="space-y-2"><Label>Visibility</Label><div className="flex gap-3 pt-1"><Button type="button" onClick={() => setIsPrivate(false)} className={`flex-1 ${!isPrivate ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Shared</Button><Button type="button" onClick={() => setIsPrivate(true)} className={`flex-1 ${isPrivate ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-500'}`}>Private</Button></div></div><DialogFooter><Button type="submit" className="w-full h-11 bg-slate-900">Save Changes</Button></DialogFooter></form></DialogContent></Dialog>
+        <Dialog open={isOpen} onOpenChange={setIsOpen}><DialogTrigger asChild><Button variant="ghost" size="icon" className="h-7 w-7 rounded-md hover:bg-slate-100"><Pencil className="w-4 h-4 text-slate-400" /></Button></DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>Edit List</DialogTitle><DialogDescription>Update list name and privacy.</DialogDescription></DialogHeader>
+            <form onSubmit={handleSubmit} className="space-y-5 pt-2">
+                <div><Label>List Name</Label><Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5 h-11" /></div>
+
+                {/* ⚡ UPDATED: Consistent Visibility Toggle */}
+                <div className="space-y-2 pt-1">
+                    <Label>Visibility</Label>
+                    <div className="flex gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setIsPrivate(false)}
+                            className={`flex-1 flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all ${!isPrivate ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-100 bg-white text-slate-400 hover:bg-slate-50'}`}
+                        >
+                            <Globe className="w-6 h-6" />
+                            <span className="text-xs font-bold">Shared</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setIsPrivate(true)}
+                            className={`flex-1 flex flex-col items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all ${isPrivate ? 'border-rose-500 bg-rose-50 text-rose-700' : 'border-slate-100 bg-white text-slate-400 hover:bg-slate-50'}`}
+                        >
+                            <Lock className="w-6 h-6" />
+                            <span className="text-xs font-bold">Private</span>
+                        </button>
+                    </div>
+                </div>
+
+                <DialogFooter><Button type="submit" className="w-full h-11 bg-slate-900">Save Changes</Button></DialogFooter>
+            </form>
+        </DialogContent></Dialog>
     )
 }
 
@@ -541,9 +593,8 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
     useEffect(() => {
         if (Capacitor.isNativePlatform()) {
-            StatusBar.setStyle({ style: Style.Dark }).catch(() => { }); // ⚡ Dark Style = White Icons on Android (Confusing naming, I know)
-            StatusBar.setBackgroundColor({ color: '#000000' }).catch(() => { });
-            StatusBar.setOverlaysWebView({ overlay: false }).catch(() => { });
+            StatusBar.setStyle({ style: Style.Light }).catch(() => { }); // ⚡ Dark Style = White Icons on Android
+            StatusBar.setOverlaysWebView({ overlay: true }).catch(() => { });
         }
 
         if (Capacitor.isNativePlatform()) {
