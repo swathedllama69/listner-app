@@ -1,7 +1,8 @@
 //
 "use client"
 
-import { useState, useEffect, FormEvent, useRef } from "react" // ⚡ FIX: Added FormEvent
+import { useState, useEffect, FormEvent, useRef } from "react"
+// ... (Keep existing imports)
 import { createPortal } from "react-dom"
 import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
@@ -10,8 +11,8 @@ import { App as CapApp } from "@capacitor/app"
 import { StatusBar, Style } from "@capacitor/status-bar"
 import { PushNotifications } from "@capacitor/push-notifications"
 
-// UI Imports
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card" // ⚡ FIX: Added CardHeader, CardContent
+// ... (Keep UI imports same as before)
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -39,7 +40,7 @@ import { compressImage } from "@/lib/utils"
 import { CACHE_KEYS, saveToCache, loadFromCache } from "@/lib/offline"
 import toast, { Toaster } from 'react-hot-toast'
 
-// --- TYPES ---
+// ... (Keep Types: ListWithSummary, ListSummary) ...
 type ListWithSummary = List & {
     pending_items?: number; estimated_cost?: number;
     active_goals?: number; target_amount?: number; saved_amount?: number;
@@ -51,7 +52,10 @@ type ListSummary = {
     total_goals?: number; completed_goals?: number;
 };
 
-// --- AUXILIARY HELPER COMPONENTS ---
+// ... (Keep Helper Components: ConfirmDialog, PortalFAB, PullToRefresh, CreateMenu, ListManager, EditListDialog) ...
+// (I will omit repeating the helper component code here to save space, assume they are unchanged from the previous correct version. 
+//  IMPORTANT: When you copy this, ensure you keep the definitions of ConfirmDialog, PortalFAB, PullToRefresh, CreateMenu, ListManager, and EditListDialog inside this file.)
+
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
@@ -121,7 +125,6 @@ function PullToRefresh({ onRefresh, children }: { onRefresh: () => Promise<void>
     );
 }
 
-// --- CREATE MENU ---
 function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess, currencySymbol, viewScope }: {
     isOpen: boolean, onOpenChange: (open: boolean) => void, context: string, user: User, household: Household, onSuccess: () => void, currencySymbol: string, viewScope: 'unified' | 'household' | 'solo'
 }) {
@@ -239,7 +242,6 @@ function CreateMenu({ isOpen, onOpenChange, context, user, household, onSuccess,
     )
 }
 
-// --- LIST MANAGER ---
 function ListManager({ user, household, listType, onListSelected, currencySymbol, refreshTrigger }: { user: User, household: Household, listType: 'wishlist' | 'shopping', onListSelected: (isSelected: boolean) => void, currencySymbol: string, refreshTrigger: number }) {
     const [lists, setLists] = useState<ListWithSummary[]>([])
     const [selectedList, setSelectedList] = useState<List | null>(null)
@@ -451,7 +453,6 @@ function ListManager({ user, household, listType, onListSelected, currencySymbol
                                             </div>
                                             <h3 className="font-bold text-slate-800 text-lg mb-0 truncate flex-1">{list.name}</h3>
 
-                                            {/* ⚡ RED PADLOCK */}
                                             {list.is_private && <Lock className="w-5 h-5 text-red-500 fill-red-50 stroke-[2.5]" />}
                                         </div>
 
@@ -540,7 +541,8 @@ export function Dashboard({ user, household }: { user: User, household: Househol
 
     useEffect(() => {
         if (Capacitor.isNativePlatform()) {
-            StatusBar.setStyle({ style: Style.Light }).catch(() => { });
+            StatusBar.setStyle({ style: Style.Dark }).catch(() => { }); // ⚡ Dark Style = White Icons on Android (Confusing naming, I know)
+            StatusBar.setBackgroundColor({ color: '#000000' }).catch(() => { });
             StatusBar.setOverlaysWebView({ overlay: false }).catch(() => { });
         }
 

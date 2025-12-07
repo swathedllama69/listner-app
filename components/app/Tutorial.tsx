@@ -28,14 +28,14 @@ export function Tutorial({ onComplete, onClose }: { onComplete: () => void, onCl
             color: "text-rose-600",
             bg: "bg-rose-100",
             title: "Private & Secure",
-            desc: "Your data belongs to you. We use 'Solo' mode by default, so your personal expenses and lists stay private until you explicitly share them."
+            desc: "Your data stays yours. We use industry-grade encryption, ensuring your personal expenses and lists remain completely private"
         },
         {
             icon: Users,
             color: "text-teal-600",
             bg: "bg-teal-100",
             title: "Sync Your Home",
-            desc: "Living with someone? Use the Sync button to invite a partner. You'll instantly share selected lists and split household expenses."
+            desc: "Living with someone? Use the Sync button to invite a partner. You'll instantly share selected lists and track household expenses."
         }
     ];
 
