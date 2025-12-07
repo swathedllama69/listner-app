@@ -1,10 +1,9 @@
+//
 "use client"
 
 import React, { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ShoppingCart, CheckCircle2, ArrowRight, Sparkles, Plus, Users, Check, Wallet, Target, Bell, ShieldCheck, X } from "lucide-react";
-
+import { ShoppingCart, Check, Target, Users, Lock, ChevronRight, X } from "lucide-react";
 
 export function Tutorial({ onComplete, onClose }: { onComplete: () => void, onClose: () => void }) {
     const [index, setIndex] = useState(0);
@@ -12,31 +11,31 @@ export function Tutorial({ onComplete, onClose }: { onComplete: () => void, onCl
     const slides = [
         {
             icon: Target,
-            color: "text-purple-600",
-            bg: "bg-purple-100",
-            title: "Smart Wishlists",
-            desc: "Create shared goals or private wishlists. Save towards them together or solo."
+            color: "text-indigo-600",
+            bg: "bg-indigo-100",
+            title: "Your Goals, Your Way",
+            desc: "Create personal wishlists to track your savings. Keep them private for your eyes only, or toggle them to 'Shared' when you're ready to plan together."
         },
         {
             icon: ShoppingCart,
-            color: "text-blue-600",
-            bg: "bg-blue-100",
-            title: "Shopping Sync",
-            desc: "Never forget an item again. Your shopping lists sync instantly with everyone in the household."
+            color: "text-lime-600",
+            bg: "bg-lime-100",
+            title: "Smarter Shopping",
+            desc: "Build your grocery or to-do lists. Add items, set priorities, and check them off. It's the ultimate pocket organizer."
         },
         {
-            icon: Wallet,
-            color: "text-emerald-600",
-            bg: "bg-emerald-100",
-            title: "Track & Split Finances",
-            desc: "Switch between Household (shared) and Solo (personal) modes. Track shared bills or private expenses easily."
+            icon: Lock,
+            color: "text-rose-600",
+            bg: "bg-rose-100",
+            title: "Private & Secure",
+            desc: "Your data belongs to you. We use 'Solo' mode by default, so your personal expenses and lists stay private until you explicitly share them."
         },
         {
             icon: Users,
-            color: "text-indigo-600",
-            bg: "bg-indigo-100",
+            color: "text-teal-600",
+            bg: "bg-teal-100",
             title: "Sync Your Home",
-            desc: "Use the Sync button to invite members. Connect your partner or family to start collaborating."
+            desc: "Living with someone? Use the Sync button to invite a partner. You'll instantly share selected lists and split household expenses."
         }
     ];
 
@@ -48,37 +47,52 @@ export function Tutorial({ onComplete, onClose }: { onComplete: () => void, onCl
     const CurrentIcon = slides[index].icon;
 
     return (
-        <div className="fixed inset-0 z-50 bg-white flex flex-col">
-            {/* Top Bar with SINGLE Close Button */}
-            <div className="flex justify-end p-6 pt-12">
-                <button onClick={onClose} className="p-2 bg-slate-100 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition-colors">
-                    <X className="w-5 h-5" />
+        <div className="fixed inset-0 z-[100] bg-white flex flex-col">
+            {/* Top Bar */}
+            <div className="flex justify-between items-center p-6 pt-12">
+                <div className="flex gap-1">
+                    {slides.map((_, i) => (
+                        <div
+                            key={i}
+                            className={`h-1.5 rounded-full transition-all duration-300 ${i === index ? 'w-8 bg-slate-900' : 'w-2 bg-slate-200'}`}
+                        />
+                    ))}
+                </div>
+                <button onClick={onClose} className="text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors">
+                    SKIP
                 </button>
             </div>
 
-            {/* Content */}
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto">
-                <div key={index} className="animate-in slide-in-from-right-8 fade-in duration-500 flex flex-col items-center">
-                    <div className={`w-24 h-24 rounded-3xl ${slides[index].bg} ${slides[index].color} flex items-center justify-center mb-10 shadow-lg shadow-black/5`}>
-                        <CurrentIcon className="w-10 h-10" />
+            {/* Content Area */}
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center max-w-md mx-auto w-full">
+                <div key={index} className="animate-in slide-in-from-right-12 fade-in duration-500 flex flex-col items-center w-full">
+                    <div className="mb-12 relative">
+                        <div className={`absolute inset-0 ${slides[index].bg} blur-2xl opacity-50 rounded-full scale-150`}></div>
+                        <div className={`w-32 h-32 rounded-[2rem] ${slides[index].bg} ${slides[index].color} flex items-center justify-center shadow-xl relative z-10 rotate-3 transition-transform duration-500`}>
+                            <CurrentIcon className="w-16 h-16" />
+                        </div>
                     </div>
-                    <h2 className="text-3xl font-bold text-slate-900 mb-4 tracking-tight">{slides[index].title}</h2>
-                    <p className="text-lg text-slate-500 leading-relaxed">{slides[index].desc}</p>
+
+                    <h2 className="text-3xl font-extrabold text-slate-900 mb-4 tracking-tight leading-tight">
+                        {slides[index].title}
+                    </h2>
+                    <p className="text-lg text-slate-500 leading-relaxed font-medium">
+                        {slides[index].desc}
+                    </p>
                 </div>
             </div>
 
             {/* Bottom Controls */}
-            <div className="p-8 pb-12 flex items-center justify-between max-w-md mx-auto w-full">
-                {/* Indicators */}
-                <div className="flex gap-2">
-                    {slides.map((_, i) => (
-                        <div key={i} className={`h-2 rounded-full transition-all duration-300 ${i === index ? 'w-8 bg-slate-900' : 'w-2 bg-slate-200'}`} />
-                    ))}
-                </div>
-
-                <Button onClick={handleNext} className="h-14 px-8 rounded-2xl bg-slate-900 text-white text-lg font-bold shadow-xl shadow-slate-200 hover:bg-slate-800 transition-transform active:scale-95">
-                    {index === slides.length - 1 ? "Get Started" : "Next"}
-                    {index === slides.length - 1 ? <Check className="w-5 h-5 ml-2" /> : <ArrowRight className="w-5 h-5 ml-2" />}
+            <div className="p-8 pb-12 max-w-md mx-auto w-full">
+                <Button
+                    onClick={handleNext}
+                    className="w-full h-14 rounded-2xl bg-slate-900 text-white text-lg font-bold shadow-xl shadow-slate-200 hover:bg-slate-800 transition-all active:scale-95 group"
+                >
+                    {index === slides.length - 1 ? "Let's Go" : "Continue"}
+                    {index === slides.length - 1 ?
+                        <Check className="w-5 h-5 ml-2" /> :
+                        <ChevronRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+                    }
                 </Button>
             </div>
         </div>

@@ -41,12 +41,13 @@ const getProgressColor = (percent: number) => {
     return "bg-slate-400";
 };
 
+// ⚡ RE-DESIGNED FAB
 function PortalFAB({ onClick, className, icon: Icon, label }: any) {
     const [mounted, setMounted] = useState(false);
     useEffect(() => setMounted(true), []);
     if (!mounted) return null;
     return createPortal(
-        <div className="fixed bottom-24 right-4 md:bottom-10 md:right-10 z-[50] flex items-center gap-3 animate-in zoom-in duration-300 pointer-events-none">
+        <div className="fixed bottom-24 right-4 md:bottom-10 md:right-10 z-[200] flex items-center gap-3 animate-in zoom-in duration-300 pointer-events-none">
             {label && <span className="bg-slate-900 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg pointer-events-auto">{label}</span>}
             <Button onClick={onClick} className={`${className} shadow-2xl border-4 border-white/20 active:scale-90 transition-transform pointer-events-auto`}>
                 <Icon className="w-8 h-8" />
@@ -64,7 +65,7 @@ const getProgress = (saved: number | null, target: number | null) => {
 function ConfirmDialog({ isOpen, onOpenChange, title, description, onConfirm }: { isOpen: boolean, onOpenChange: (open: boolean) => void, title: string, description: string, onConfirm: () => void }) {
     return (
         <Dialog open={isOpen} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-sm rounded-2xl">
+            <DialogContent className="sm:max-w-sm rounded-2xl z-[250]">
                 <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{description}</DialogDescription></DialogHeader>
                 <DialogFooter className="flex gap-2 sm:justify-end"><Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button><Button variant="destructive" onClick={() => { onConfirm(); onOpenChange(false); }}>Confirm</Button></DialogFooter>
             </DialogContent>
@@ -76,10 +77,8 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
     const [items, setItems] = useState<WishlistItem[]>([])
     const [isLoading, setIsLoading] = useState(true)
     const [activeTab, setActiveTab] = useState("All")
-    const [usingCachedData, setUsingCachedData] = useState(false);
-
-    // ⚡ FIX: Restored Pagination State
     const [page, setPage] = useState(1);
+    const [usingCachedData, setUsingCachedData] = useState(false);
     const ITEMS_PER_PAGE = 20;
 
     const [isFormOpen, setIsFormOpen] = useState(false)
@@ -162,7 +161,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
         });
     }, [items, activeTab]);
 
-    // ⚡ FIX: Restored Derived State for Pagination
     const visibleItems = activeItems.slice(0, page * ITEMS_PER_PAGE);
     const hasMore = activeItems.length > visibleItems.length;
 
@@ -265,7 +263,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
     return (
         <div className="flex flex-col h-full max-w-4xl mx-auto w-full relative">
-            {/* Header */}
             <div className="z-10 bg-slate-900 text-white px-5 py-4 shadow-md rounded-b-xl md:rounded-2xl relative overflow-hidden mb-4">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
                 <div className="relative z-10 flex justify-between items-start">
@@ -313,7 +310,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                     <TabsContent value={activeTab} className="space-y-3 pb-32">
                         {isLoading && items.length === 0 ? <p className="text-center py-12 text-slate-400">Loading...</p> : visibleItems.length === 0 ? <div className="text-center py-12 text-slate-400 flex flex-col items-center"><Goal className="w-12 h-12 opacity-20 mb-2" /> No active goals.</div> : (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                {/* ⚡ FIX: Mapped using standard array map instead of virtual scroll */}
                                 {visibleItems.map(item => {
                                     const progress = getProgress(item.saved_amount, item.target_amount);
                                     const isExpanded = expandedId === item.id;
@@ -321,17 +317,35 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
 
                                     return (
                                         <div key={item.id} className={`border rounded-xl transition-all duration-200 overflow-hidden bg-white shadow-sm ${getPriorityCardStyle(item.priority || 'Medium')} ${isExpanded ? 'ring-1 ring-lime-200' : ''}`}>
-                                            <div className="p-3 flex items-center gap-3 cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : item.id)}>
-                                                <Checkbox checked={item.is_complete} onCheckedChange={() => toggleComplete(item)} onClick={(e) => e.stopPropagation()} className="mt-0.5 rounded-full data-[state=checked]:bg-emerald-500 border-slate-400" />
-                                                <div className="flex-1 min-w-0">
-                                                    <div className="flex justify-between items-center mb-1">
-                                                        <h3 className={`font-bold text-sm truncate ${isHigh ? 'text-rose-800' : 'text-slate-800'}`}>{item.name}</h3>
-                                                        <span className="text-xs font-bold text-slate-600">{Math.round(progress)}%</span>
+                                            <div className="p-3 flex items-center justify-between gap-3">
+                                                <div className="flex items-center gap-3 flex-1 min-w-0" onClick={() => setExpandedId(isExpanded ? null : item.id)}>
+                                                    <Checkbox checked={item.is_complete} onCheckedChange={() => toggleComplete(item)} onClick={(e) => e.stopPropagation()} className="mt-0.5 rounded-full data-[state=checked]:bg-emerald-500 border-slate-400" />
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex justify-between items-center mb-1">
+                                                            <h3 className={`font-bold text-sm truncate ${isHigh ? 'text-rose-800' : 'text-slate-800'}`}>{item.name}</h3>
+                                                            <span className="text-xs font-bold text-slate-600">{Math.round(progress)}%</span>
+                                                        </div>
+                                                        <Progress value={progress} className="h-1.5 bg-slate-100" indicatorClassName={getProgressColor(progress)} />
                                                     </div>
-                                                    <Progress value={progress} className="h-1.5 bg-slate-100" indicatorClassName={getProgressColor(progress)} />
                                                 </div>
-                                                <div className="text-slate-400">{isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
+
+                                                {/* ⚡ FIX: Dropdown is now always visible on the card */}
+                                                <div className="flex items-center">
+                                                    <Button variant="ghost" size="icon" onClick={() => setExpandedId(isExpanded ? null : item.id)} className="h-8 w-8 text-slate-400">
+                                                        {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                                    </Button>
+
+                                                    <DropdownMenu>
+                                                        <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" className="h-8 w-8 p-0 hover:bg-slate-100 rounded-full"><MoreHorizontal className="w-4 h-4 text-slate-500" /></Button></DropdownMenuTrigger>
+                                                        <DropdownMenuContent align="end">
+                                                            <DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Details</DropdownMenuItem>
+                                                            <DropdownMenuSeparator />
+                                                            <DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem>
+                                                        </DropdownMenuContent>
+                                                    </DropdownMenu>
+                                                </div>
                                             </div>
+
                                             {isExpanded && (
                                                 <div className="px-4 pb-4 pt-0 bg-slate-50/50 border-t border-slate-100 animate-in slide-in-from-top-1">
                                                     <div className="flex justify-between text-xs text-slate-500 mt-3 mb-3 font-medium">
@@ -342,12 +356,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                                                     <div className="flex gap-2 mt-2">
                                                         <Button size="sm" variant="outline" className="flex-1 h-9 text-xs bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 font-semibold" onClick={() => { setSelectedItemForContrib(item); setIsContributionOpen(true) }}><Plus className="w-3 h-3 mr-1" /> Add Savings</Button>
                                                         {item.link && <Button size="sm" variant="outline" className="h-9 w-9 p-0" onClick={() => window.open(item.link!, '_blank')}><LinkIcon className="w-4 h-4 text-blue-500" /></Button>}
-                                                        {item.user_id === user.id && (
-                                                            <DropdownMenu>
-                                                                <DropdownMenuTrigger asChild><Button size="sm" variant="ghost" className="h-9 w-9 p-0 hover:bg-slate-100"><MoreHorizontal className="w-4 h-4 text-slate-500" /></Button></DropdownMenuTrigger>
-                                                                <DropdownMenuContent align="end"><DropdownMenuItem onClick={() => setEditingItem(item)}><Pencil className="w-4 h-4 mr-2" /> Edit Details</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="text-red-600" onClick={() => setDeleteConfirm({ isOpen: true, type: 'item', id: item.id })}><Trash2 className="w-4 h-4 mr-2" /> Delete</DropdownMenuItem></DropdownMenuContent>
-                                                            </DropdownMenu>
-                                                        )}
                                                     </div>
                                                 </div>
                                             )}
@@ -356,7 +364,6 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                                 })}
                             </div>
                         )}
-                        {/* ⚡ FIX: Added Load More Button */}
                         {hasMore && (
                             <Button variant="ghost" className="w-full text-xs text-slate-400 py-4" onClick={() => setPage(p => p + 1)}>
                                 Load More Goals
@@ -385,11 +392,11 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
                 </Accordion>
             )}
 
-            {/* LIME FAB */}
             <PortalFAB onClick={() => setIsFormOpen(true)} className="h-16 w-16 rounded-full shadow-2xl bg-lime-500 hover:bg-lime-600 text-slate-900 flex items-center justify-center transition-transform hover:scale-105 active:scale-95" icon={Plus} label="New Goal" />
 
+            {/* Dialogs ... */}
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-                <DialogContent className="sm:max-w-md rounded-2xl">
+                <DialogContent className="sm:max-w-md rounded-2xl z-[250]">
                     <DialogHeader><DialogTitle>Add New Goal/Item</DialogTitle><DialogDescription>Define a new saving goal or item target.</DialogDescription></DialogHeader>
                     <form onSubmit={handleAddItem} className="grid grid-cols-2 gap-4 py-2">
                         <div className="col-span-2"><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="h-11" required autoComplete="off" /></div>
@@ -405,7 +412,7 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             </Dialog>
 
             <Dialog open={isContributionOpen} onOpenChange={setIsContributionOpen}>
-                <DialogContent className="sm:max-w-sm rounded-2xl">
+                <DialogContent className="sm:max-w-sm rounded-2xl z-[250]">
                     <DialogHeader><DialogTitle>Add Funds</DialogTitle><DialogDescription>Enter the amount you are contributing.</DialogDescription></DialogHeader>
                     <form onSubmit={handleAddContribution} className="space-y-4 py-2">
                         <div className="space-y-2"><Label>Amount ({currencySymbol})</Label><Input type="number" className="h-14 text-2xl font-bold text-center" placeholder="0.00" value={contribForm.amount} onChange={e => setContribForm({ ...contribForm, amount: e.target.value })} autoFocus autoComplete="off" /></div>
@@ -416,11 +423,16 @@ export function ListDetail({ user, list, currencySymbol }: { user: User, list: L
             </Dialog>
 
             <Dialog open={!!editingItem} onOpenChange={() => setEditingItem(null)}>
-                {editingItem && <EditWishlistItemForm item={editingItem} onUpdate={handleUpdateItem} onClose={() => setEditingItem(null)} currencySymbol={currencySymbol} />}
+                {editingItem && (
+                    <DialogContent className="sm:max-w-[625px] rounded-2xl z-[250]">
+                        <DialogHeader><DialogTitle>Edit Goal</DialogTitle><DialogDescription>Modify the details of your goal.</DialogDescription></DialogHeader>
+                        <EditWishlistItemForm item={editingItem} onUpdate={handleUpdateItem} onClose={() => setEditingItem(null)} currencySymbol={currencySymbol} />
+                    </DialogContent>
+                )}
             </Dialog>
 
             <Dialog open={isRenameOpen} onOpenChange={setIsRenameOpen}>
-                <DialogContent className="sm:max-w-sm rounded-2xl">
+                <DialogContent className="sm:max-w-sm rounded-2xl z-[250]">
                     <DialogHeader><DialogTitle>Rename List</DialogTitle><DialogDescription>Enter a new name for this list.</DialogDescription></DialogHeader>
                     <div className="flex gap-2 py-2"><Input value={listNameForm} onChange={e => setListNameForm(e.target.value)} className="h-11" autoComplete="off" /><Button onClick={handleRenameList}>Save</Button></div>
                 </DialogContent>
@@ -437,9 +449,6 @@ function EditWishlistItemForm({ item, onUpdate, onClose, currencySymbol }: { ite
     const handleChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setForm({ ...form, [e.target.name]: e.target.value });
     const handleSubmit = async (e: FormEvent) => { e.preventDefault(); setIsSubmitting(true); await onUpdate({ ...form, target_amount: parseFloat(form.target_amount) || null, saved_amount: parseFloat(form.saved_amount) || 0, quantity: form.category === "Item" ? parseInt(form.quantity) : null }); setIsSubmitting(false); onClose(); };
     return (
-        <DialogContent className="sm:max-w-[625px] rounded-2xl">
-            <DialogHeader><DialogTitle>Edit Goal</DialogTitle><DialogDescription>Modify the details of your goal.</DialogDescription></DialogHeader>
-            <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4"><div className="col-span-2"><Label>Name</Label><Input name="name" value={form.name} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-2"><Label>Description</Label><Textarea name="description" value={form.description} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Target ({currencySymbol})</Label><Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-1"><Label>Saved ({currencySymbol})</Label><Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div><div className="col-span-1"><Label>Link</Label><Input name="link" value={form.link} onChange={handleChange} autoComplete="off" /></div><DialogFooter className="col-span-2"><Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button></DialogFooter></form>
-        </DialogContent>
+        <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4 py-4"><div className="col-span-2"><Label>Name</Label><Input name="name" value={form.name} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-2"><Label>Description</Label><Textarea name="description" value={form.description} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Target ({currencySymbol})</Label><Input name="target_amount" type="number" value={form.target_amount} onChange={handleChange} required autoComplete="off" /></div><div className="col-span-1"><Label>Saved ({currencySymbol})</Label><Input name="saved_amount" type="number" value={form.saved_amount} onChange={handleChange} autoComplete="off" /></div><div className="col-span-1"><Label>Priority</Label><Select value={form.priority} onValueChange={v => setForm({ ...form, priority: v })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{priorities.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div><div className="col-span-1"><Label>Link</Label><Input name="link" value={form.link} onChange={handleChange} autoComplete="off" /></div><DialogFooter className="col-span-2"><Button type="submit" disabled={isSubmitting}>{isSubmitting ? 'Saving...' : 'Save Changes'}</Button></DialogFooter></form>
     );
 }
