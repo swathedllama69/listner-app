@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase"
 import { User } from "@supabase/supabase-js"
 import { Capacitor } from "@capacitor/core"
 import { BarcodeScanner, BarcodeFormat } from '@capacitor-mlkit/barcode-scanning';
+import { Household } from "@/lib/types" // Import Household type
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,9 +16,9 @@ import {
     ChevronLeft, Plus, Sparkles, QrCode
 } from "lucide-react"
 
-export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, onHouseholdCreated: (user: User) => void }) {
+// ⚡ UPDATE: Prop now accepts optional household argument
+export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, onHouseholdCreated: (user: User, household?: Household) => void }) {
     const [view, setView] = useState<'choice' | 'create_input' | 'join_input'>('choice');
-
     const [loading, setLoading] = useState(false)
     const [name, setName] = useState("")
     const [inviteCode, setInviteCode] = useState("")
@@ -28,6 +29,8 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
         setLoading(true); setError(null);
 
         try {
+            let targetHouseholdId = '';
+
             if (view === 'create_input') {
                 const { data: hh, error: hhError } = await supabase.from('households').insert({
                     name: name,
@@ -35,6 +38,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                     country: 'Nigeria',
                 }).select().single();
                 if (hhError) throw hhError;
+                targetHouseholdId = hh.id;
 
                 const { error: memError } = await supabase.from('household_members').insert({
                     user_id: user.id,
@@ -48,6 +52,7 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 if (!codeToUse) throw new Error("Missing invite code");
                 const { data: hh, error: fetchError } = await supabase.from('households').select('id').eq('invite_code', codeToUse.trim().toUpperCase()).single();
                 if (fetchError || !hh) throw new Error("Invalid invite code");
+                targetHouseholdId = hh.id;
 
                 const { data: existing } = await supabase.from('household_members').select('id').eq('user_id', user.id).eq('household_id', hh.id).maybeSingle();
                 if (!existing) {
@@ -61,17 +66,12 @@ export function CreateHouseholdForm({ user, onHouseholdCreated }: { user: User, 
                 }
             }
 
-            // ⚡ FIX: Add delay and verification to prevent race condition where page.tsx queries too early
-            setLoading(true);
-            let retries = 5;
-            while (retries > 0) {
-                const { data: verify } = await supabase.from('household_members').select('id').eq('user_id', user.id).maybeSingle();
-                if (verify) break;
-                await new Promise(r => setTimeout(r, 800));
-                retries--;
-            }
+            // ⚡ FIX: Fetch the full household object to pass back
+            // This allows the parent to update state immediately without a risky re-fetch
+            const { data: fullHousehold } = await supabase.from('households').select('*').eq('id', targetHouseholdId).single();
 
-            onHouseholdCreated(user);
+            // Pass the household object up
+            onHouseholdCreated(user, fullHousehold as Household);
 
         } catch (err: any) {
             console.error(err);

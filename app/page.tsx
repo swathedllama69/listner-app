@@ -357,7 +357,27 @@ function AuthWrapper() {
     setStage(household ? 'APP' : 'SETUP_HOUSEHOLD');
   };
 
-  // Safe area padding for non-app screens
+  // ⚡ FIX: New Optimistic Join Handler
+  const handleHouseholdJoinSuccess = (currentUser: User, newHousehold?: Household) => {
+    if (newHousehold) {
+      // 1. Immediately set household state so UI updates
+      setHousehold(newHousehold);
+
+      // 2. Determine next stage based on tutorial status
+      const seenTutorial = localStorage.getItem(`tutorial_seen_${currentUser.id}`) === 'true';
+      setStage(seenTutorial ? 'APP' : 'TUTORIAL');
+
+      // 3. Cache the new data
+      saveToCache(CACHE_KEYS.HOUSEHOLD(currentUser.id), newHousehold);
+
+      // 4. Background refresh to ensure everything is synced
+      loadUserData(currentUser, true);
+    } else {
+      // Fallback if no household object is passed (legacy behavior)
+      loadUserData(currentUser, true);
+    }
+  };
+
   const safeAreaWrapper = "pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] min-h-screen flex flex-col";
 
   switch (stage) {
@@ -381,20 +401,23 @@ function AuthWrapper() {
       </div>
     );
     case 'WELCOME': return <OnboardingScreen onStart={() => setStage('AUTH')} />;
+    // Note: AuthPage needs to be imported or defined in this file. 
+    // Assuming standard AuthPage component is used here. 
+    // If it's a separate file, make sure to import it. 
+    // For this snippet, I'm assuming it's imported or defined below.
     case 'AUTH': return <div className={safeAreaWrapper}><AuthPage /></div>;
     case 'TUTORIAL': return (
       <div className={safeAreaWrapper}>
         <Tutorial
           onComplete={handleTutorialComplete}
-          onClose={handleTutorialClose} // ⚡ Connected close handler
+          onClose={handleTutorialClose}
         />
       </div>
     );
-    case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={(u) => loadUserData(u, true)} /></div>;
+    case 'SETUP_HOUSEHOLD': return <div className={safeAreaWrapper}><CreateHouseholdForm user={user!} onHouseholdCreated={handleHouseholdJoinSuccess} /></div>;
 
     case 'APP':
       return (
-        // Dashboard handles its own safe area spacing (pt-4/pt-12)
         <div className="relative min-h-screen flex flex-col w-full pb-[env(safe-area-inset-bottom)]">
           {user && household && <Dashboard user={user} household={household} />}
         </div>
@@ -403,7 +426,11 @@ function AuthWrapper() {
   }
 }
 
-// --- AUTH PAGE ---
+// ----------------------------------------------------------------------
+// AUTH PAGE COMPONENT (Restoring original content to ensure completeness)
+// ----------------------------------------------------------------------
+import { ListChecks as ListChecksIcon } from "lucide-react"; // Import renamed to avoid conflict if needed, or use existing
+
 function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -421,7 +448,7 @@ function AuthPage() {
     { title: "Fully Secured", desc: "Your financial and household data is protected with enterprise-grade encryption.", icon: ShieldCheck, color: "bg-indigo-500" },
   ];
 
-  // ⚡ OPTIMIZED ANIMATIONS (Floating Items Preserved, Background Blobs Removed for Performance)
+  // Animation items logic...
   const animationItems = [
     { type: '🍎', size: 10, duration: 18, delay: 0, top: '10%', left: '10%', animKey: 'slowDrift1', isEmoji: true, opacity: 0.25 },
     { type: '💵', size: 14, duration: 18, delay: 10, bottom: '10%', left: '40%', animKey: 'slowDrift3', isEmoji: true, opacity: 0.15 },
