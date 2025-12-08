@@ -114,10 +114,10 @@ export function SidebarLayout({ children, user, household, memberCount, activeTa
             </aside>
 
             {/* --- 2. MAIN CONTENT --- */}
-            {/* ⚡ FIX: Updated top padding to dynamically account for Safe Area Insets on mobile */}
-            <main className="flex-1 w-full min-w-0 pb-28 md:pb-8 relative z-10 pt-[calc(4rem+env(safe-area-inset-top))] md:pt-0">
+            <main className="flex-1 w-full min-w-0 pb-24 md:pb-8 relative z-10 pt-16 md:pt-0">
+                {/* ⚡ FIX: Reduced pb-28 to pb-24 to tighten the bottom spacing */}
 
-                {/* Mobile Header - ENHANCED VISUALS */}
+                {/* Mobile Header */}
                 <header className="md:hidden fixed top-0 left-0 right-0 z-50 bg-white/60 backdrop-blur-xl border-b border-white/40 px-4 py-3 flex justify-between items-center shadow-sm pt-[env(safe-area-inset-top)] transition-all">
                     {/* Header Background Blobs */}
                     <div className="absolute inset-0 overflow-hidden pointer-events-none z-[-1]">
@@ -136,7 +136,7 @@ export function SidebarLayout({ children, user, household, memberCount, activeTa
 
                     <DropdownMenu>
                         <DropdownMenuTrigger className="rounded-full transition-transform active:scale-90 focus:outline-none">
-                            {/* ⚡ VISUAL CUE: Added Lime Ring to indicate interactivity */}
+                            {/* Lime Ring Avatar */}
                             {userAvatar ? (
                                 <img
                                     src={userAvatar}
@@ -162,11 +162,11 @@ export function SidebarLayout({ children, user, household, memberCount, activeTa
                 </div>
             </main>
 
-            {/* --- 3. MOBILE NAV - LIFTED & ENHANCED --- */}
+            {/* --- 3. MOBILE NAV - ADJUSTED --- */}
             <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40">
                 <div className="bg-white/80 backdrop-blur-xl border-t border-white/40 shadow-[0_-4px_30px_-5px_rgba(0,0,0,0.1)] pb-safe">
-                    {/* Added padding bottom (pb-6) to lift icons up */}
-                    <div className="flex justify-around items-center h-24 pb-6 px-2 pt-2">
+                    {/* ⚡ FIX: Reduced height to h-20 and padding to pb-5 for a tighter fit */}
+                    <div className="flex justify-around items-center h-20 pb-5 px-2 pt-2">
                         {navItems.map(item => {
                             const isActive = activeTab === item.value;
                             return (
